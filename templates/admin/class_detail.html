@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_macros.html" import avatar, empty_state, combo_path %}
+{% block title %}Class - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="path-title">{{ combo_path(combo, 'class-path-lg') }}</h1>
+    <p class="page-sub">Who is registered in this class and who teaches it.</p>
+  </div>
+  <div class="page-actions"><a class="btn btn-outline" href="{{ url_for('admin_academic.classes') }}">All classes</a></div>
+</div>
+<div class="layout-main-side">
+  <div class="card card-flush">
+    <div class="card-head"><h2>Students ({{ students|length }})</h2></div>
+    {% if students %}
+    <div class="table-wrap">
+    <table class="table-stack">
+      <thead><tr><th scope="col">USN</th><th scope="col">Name</th><th scope="col">Status</th></tr></thead>
+      <tbody>
+      {% for s in students %}<tr><td data-label="USN"><span class="id-tag">{{ s.usn }}</span></td><td data-label="Name">{{ s.full_name }}</td><td data-label="Status">{% if s.is_active %}<span class="status status-ACTIVE">Active</span>{% else %}<span class="status status-CANCELLED">Removed</span>{% endif %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}{{ empty_state('No students have registered in this class yet.', 'users') }}{% endif %}
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Assigned faculty</h2></div>
+    {% if faculty %}
+    <ul class="row-list">
+      {% for f in faculty %}<li class="row-item">{{ avatar(f.full_name) }}<div class="row-main"><div class="row-title">{{ f.full_name }}</div><div class="row-sub">{{ f.faculty_code }} — {{ f.full_name }}</div></div></li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">None.</p>
+    <a class="btn btn-outline btn-sm" href="{{ url_for('admin_academic.assignments') }}">Assign faculty</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

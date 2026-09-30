@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_macros.html" import avatar, status_pill, class_path, icon %}
+{% block title %}My Profile - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>My Profile</h1><p>{{ class_path(student.branch, student.department, student.year, student.section) }}</p></div></div>
+<div class="grid grid-2" style="align-items:start;">
+  <div class="card">
+    <div class="profile-photo">
+      {{ avatar(student.full_name, student.profile_picture_path, 'avatar-lg', 'Profile picture of ' ~ student.full_name) }}
+      <form method="post" action="{{ url_for('student.update_picture') }}" enctype="multipart/form-data">
+        <label for="profile_picture" class="sr-only">Choose a new profile picture</label>
+        <input id="profile_picture" type="file" name="profile_picture" accept="image/*" capture="environment" required>
+        <button class="btn btn-sm" type="submit">Update Picture</button>
+      </form>
+      <p class="muted small">Select from device or capture with camera where supported.</p>
+    </div>
+    <dl class="kv">
+      <dt>Full Name</dt><dd>{{ student.full_name }}</dd>
+      <dt>USN</dt><dd><span class="id-tag">{{ student.usn }}</span></dd>
+      <dt>Branch</dt><dd>{{ student.branch }}</dd>
+      <dt>Department</dt><dd>{{ student.department }}</dd>
+      <dt>Year</dt><dd>{{ student.year }}</dd>
+      <dt>Section</dt><dd>{{ student.section }}</dd>
+      <dt>Phone</dt><dd>{{ student.phone }}</dd>
+      <dt>Personal Email</dt><dd>{{ student.personal_email }}</dd>
+      <dt>College Email</dt><dd>{{ student.college_email }}</dd>
+      <dt>Class Faculty</dt><dd>{% for f in assigned_faculty %}{{ f.full_name }}{{ ', ' if not loop.last }}{% else %}—{% endfor %}</dd>
+    </dl>
+  </div>
+
+  <div class="stack-lg">
+    <section class="card">
+      <div class="card-head"><h2>Request a Profile Change</h2></div>
+      <p class="muted small">Phone and personal email changes are approved by your class faculty. Your Branch, Department, Year and Section cannot be changed here — contact Admin if they are wrong.</p>
+      {% if not assigned_faculty %}
+        <div class="notice notice-warn">{{ icon('alert', 20) }}<p>No faculty is assigned to your class yet, so requests cannot be routed.</p></div>
+      {% else %}
+      <form method="post" action="{{ url_for('student.request_profile_change') }}">
+        <div class="grid grid-2">
+          <div class="field"><label for="phone">Phone</label><input id="phone" name="phone" type="tel" placeholder="{{ student.phone }}"></div>
+          <div class="field"><label for="personal_email">Personal Email</label><input id="personal_email" name="personal_email" type="email" placeholder="{{ student.personal_email }}"></div>
+        </div>
+        <div class="field"><label for="reason">Reason</label><textarea id="reason" name="reason" rows="2"></textarea></div>
+        <button class="btn" type="submit">Submit Request</button>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="card card-flush">
+      <div class="card-head"><h2>Your Requests</h2></div>
+      {% if pending_requests %}
+      <div class="table-wrap">
+        <table class="table-stack">
+          <thead><tr><th scope="col">Type</th><th scope="col">Status</th><th scope="col">Submitted</th></tr></thead>
+          <tbody>
+          {% for r in pending_requests %}
+            <tr><td data-label="Type">{{ r.request_type }}</td><td data-label="Status">{{ status_pill(r.status) }}</td><td data-label="Submitted">{{ r.created_at }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <div style="padding: 0 1.4rem 1.4rem;"><p class="muted">No change requests yet.</p></div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

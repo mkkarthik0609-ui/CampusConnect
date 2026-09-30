@@ -1,0 +1,194 @@
+{% from "_macros.html" import icon, brand_mark, avatar with context %}
+{% from "_macros.html" import nav_item with context %}
+<!DOCTYPE html>
+<html lang="en" data-theme="{{ current_theme or 'light' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined else '' }}">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="{{ '#0c0f1d' if current_theme == 'dark' else '#111741' }}">
+  <title>{% block title %}Campus Connect{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.svg') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&amp;family=Figtree:wght@400..700&amp;family=JetBrains+Mono:wght@500;600&amp;display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="{{ url_for('static', filename='js/boot.js') }}"></script>
+</head>
+<body class="{{ 'is-app' if current_user_role else 'is-guest' }}">
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  {% if current_user_role %}
+  {% set unread_total = (unread_messages or 0) + (unread_notifications or 0) %}
+  <div class="shell">
+    {# ---------- Mobile top bar ---------- #}
+    <header class="topbar">
+      <a class="brand" href="{{ url_for('index') }}">{{ brand_mark(30) }}<span class="brand-word">Campus<span class="brand-accent">Connect</span></span></a>
+      <div class="topbar-actions">
+        <a class="icon-btn" href="{{ url_for('notifications.list_notifications') }}" aria-label="Notifications{% if unread_notifications %} ({{ unread_notifications }} unread){% endif %}">
+          {{ icon('bell', 22) }}{% if unread_notifications %}<span class="icon-btn-dot" aria-hidden="true"></span>{% endif %}
+        </a>
+        <button class="icon-btn menu-btn" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Menu{% if unread_total %} ({{ unread_total }} unread){% endif %}">
+          {{ icon('menu', 24) }}{% if unread_total %}<span class="icon-btn-dot" aria-hidden="true"></span>{% endif %}
+        </button>
+      </div>
+    </header>
+    <div class="nav-scrim" data-nav-close aria-hidden="true"></div>
+
+    {# ---------- Sidebar navigation (grouped per role) ---------- #}
+    <nav class="sidebar navbar" id="site-nav" aria-label="Main">
+      <div class="sb-head">
+        <a class="brand" href="{{ url_for('index') }}">{{ brand_mark(32) }}<span class="brand-word">Campus<span class="brand-accent">Connect</span></span></a>
+        <button class="icon-btn sb-close" type="button" data-nav-close aria-label="Close menu">{{ icon('x', 22) }}</button>
+      </div>
+
+      <div class="sb-scroll nav-links">
+        {% if current_user_role == 'STUDENT' %}
+          <ul class="nav-list">
+            {{ nav_item('student.dashboard', 'Dashboard', 'home') }}
+          </ul>
+          <p class="nav-heading" id="ng-mentoring">Mentoring</p>
+          <ul class="nav-list" aria-labelledby="ng-mentoring">
+            {{ nav_item('chat.list_chats', 'Mentor-Connect', 'chat', unread_messages, ['chat.view_chat']) }}
+            {{ nav_item('meetings.list_meetings', 'Meetings', 'calendar', 0, ['meetings.request_meeting']) }}
+            {{ nav_item('supporting.search_faculty', 'Find Faculty', 'search') }}
+          </ul>
+          <p class="nav-heading" id="ng-account">You</p>
+          <ul class="nav-list" aria-labelledby="ng-account">
+            {{ nav_item('student.profile', 'Profile', 'user') }}
+            {{ nav_item('notifications.list_notifications', 'Notifications', 'bell', unread_notifications) }}
+          </ul>
+
+        {% elif current_user_role == 'FACULTY' %}
+          <ul class="nav-list">
+            {{ nav_item('faculty.dashboard', 'Dashboard', 'home') }}
+          </ul>
+          <p class="nav-heading" id="ng-classes">Classes</p>
+          <ul class="nav-list" aria-labelledby="ng-classes">
+            {{ nav_item('faculty.classes', 'My Classes', 'layers', 0, ['faculty.class_detail']) }}
+            {{ nav_item('supporting.search_student', 'Find Student', 'search') }}
+          </ul>
+          <p class="nav-heading" id="ng-mentoring">Mentoring</p>
+          <ul class="nav-list" aria-labelledby="ng-mentoring">
+            {{ nav_item('chat.list_chats', 'Mentor-Connect', 'chat', unread_messages, ['chat.view_chat']) }}
+            {{ nav_item('meetings.list_meetings', 'Meetings', 'calendar') }}
+            {{ nav_item('faculty.review_permission_requests', 'Approvals', 'check-circle') }}
+          </ul>
+          <p class="nav-heading" id="ng-account">You</p>
+          <ul class="nav-list" aria-labelledby="ng-account">
+            {{ nav_item('faculty.profile', 'Profile', 'user') }}
+            {{ nav_item('notifications.list_notifications', 'Notifications', 'bell', unread_notifications) }}
+          </ul>
+
+        {% elif current_user_role == 'ADMIN' %}
+          <ul class="nav-list">
+            {{ nav_item('admin.dashboard', 'Dashboard', 'home') }}
+          </ul>
+          <p class="nav-heading" id="ng-academics">Academics</p>
+          <ul class="nav-list" aria-labelledby="ng-academics">
+            {{ nav_item('admin_academic.academics', 'Academics', 'layers') }}
+            {{ nav_item('admin_academic.classes', 'Classes', 'grid', 0, ['admin_academic.class_detail']) }}
+            {{ nav_item('admin_academic.assignments', 'Assignments', 'link') }}
+            {{ nav_item('admin_academic.assignment_requests', 'Class requests', 'inbox') }}
+          </ul>
+          <p class="nav-heading" id="ng-people">People</p>
+          <ul class="nav-list" aria-labelledby="ng-people">
+            {{ nav_item('admin.students', 'Students', 'users') }}
+            {{ nav_item('admin.faculty', 'Faculty', 'book') }}
+            {{ nav_item('admin.admins', 'Admins', 'shield') }}
+          </ul>
+          <p class="nav-heading" id="ng-oversight">Oversight</p>
+          <ul class="nav-list" aria-labelledby="ng-oversight">
+            {{ nav_item('admin.meetings', 'Meetings', 'calendar') }}
+            {{ nav_item('admin.chats', 'Chats', 'chat', 0, ['admin.chat_detail']) }}
+            {{ nav_item('admin.permission_requests', 'Approvals', 'check-circle') }}
+            {{ nav_item('notifications.list_notifications', 'Notifications', 'bell', unread_notifications) }}
+          </ul>
+        {% endif %}
+      </div>
+
+      <div class="sb-foot">
+        <div class="sb-user">
+          {{ avatar(current_user_name or 'User', size='avatar-sm') }}
+          <div class="sb-user-meta">
+            <span class="sb-user-name">{{ current_user_name or 'Account' }}</span>
+            <span class="sb-user-role">{{ current_user_role|lower|capitalize }}</span>
+          </div>
+        </div>
+        <div class="sb-actions">
+          <form method="post" action="{{ url_for('student.set_theme', theme='dark' if current_theme == 'light' else 'light') }}" class="inline">
+            <button type="submit" class="sb-btn theme-toggle">{{ icon('moon' if current_theme == 'light' else 'sun', 18) }}<span>{{ 'Dark mode' if current_theme == 'light' else 'Light mode' }}</span></button>
+          </form>
+          <a class="sb-btn{{ ' is-active' if request.endpoint == 'auth.change_password' }}" href="{{ url_for('auth.change_password') }}"{% if request.endpoint == 'auth.change_password' %} aria-current="page"{% endif %}>{{ icon('key', 18) }}<span>Change password</span></a>
+          <form method="post" action="{{ url_for('auth.logout') }}" class="inline"><button type="submit" class="sb-btn">{{ icon('logout', 18) }}<span>Logout</span></button></form>
+        </div>
+      </div>
+    </nav>
+
+  {% endif %}
+
+  {# Content region: one <main>, wrapped differently for the signed-in shell and the guest layout. #}
+  {% if current_user_role %}
+    <main class="main" id="main" tabindex="-1">
+      <div class="main-inner">
+  {% else %}
+  <div class="guest">
+    <aside class="guest-aside" aria-label="About Campus Connect">
+      <a class="brand" href="{{ url_for('index') }}">{{ brand_mark(40) }}<span class="brand-word">Campus<span class="brand-accent">Connect</span></span></a>
+      <div class="guest-copy">
+        <p class="guest-lead">Every student, mapped to the faculty who know their class.</p>
+        <ol class="guest-path" aria-label="How classes are organised">
+          <li><span>Branch</span></li>
+          <li><span>Department</span></li>
+          <li><span>Year</span></li>
+          <li><span>Section</span></li>
+        </ol>
+        <ul class="guest-points">
+          <li>{{ icon('chat', 18) }}<span>Message your mentors directly, with attachments.</span></li>
+          <li>{{ icon('calendar', 18) }}<span>Request meetings and keep a record of every outcome.</span></li>
+          <li>{{ icon('check-circle', 18) }}<span>Admin-defined classes, so approvals always reach the right people.</span></li>
+        </ul>
+      </div>
+      <p class="guest-foot">Students, faculty and administrators of the college.</p>
+    </aside>
+    <main class="guest-main" id="main" tabindex="-1">
+      <div class="guest-inner">
+  {% endif %}
+
+        <div class="flash-list" aria-live="polite" aria-atomic="false">
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+              {% if message.startswith('Demo OTP') %}
+                {% set otp_code = message.split('  (')[0].split(': ')[-1] %}
+                <div class="flash flash-info flash-otp" role="status" data-persist>
+                  <div class="otp-code-wrap">
+                    <span class="otp-label">Your demo code</span>
+                    <strong class="otp-code" aria-label="{{ otp_code|list|join(' ') }}">{{ otp_code }}</strong>
+                  </div>
+                  <p class="otp-note">{{ message }}</p>
+                </div>
+              {% else %}
+                <div class="flash flash-{{ category }}" role="{{ 'alert' if category == 'error' else 'status' }}">
+                  <span class="flash-icon">{{ icon({'success': 'check-circle', 'error': 'alert', 'warning': 'alert'}.get(category, 'info'), 20) }}</span>
+                  <span class="flash-text">{{ message }}</span>
+                </div>
+              {% endif %}
+            {% endfor %}
+          {% endwith %}
+        </div>
+
+        {% block content %}{% endblock %}
+
+      </div>
+    </main>
+  {% if current_user_role %}
+  </div>{# /.shell #}
+  {% else %}
+  </div>{# /.guest #}
+  {% endif %}
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

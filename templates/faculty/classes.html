@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_macros.html" import academic_picker, icon, status_pill, empty_state, class_path %}
+{% block title %}My Classes - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>My Classes</h1>
+    <p class="page-sub">Classes Admin has assigned to you. Open one to work with its students.</p>
+  </div>
+  <div class="page-actions"><a class="btn btn-outline" href="#request-class">{{ icon('plus', 18) }}Request a class</a></div>
+</div>
+
+{% if assignments %}
+<div class="grid grid-2">
+  {% for a in assignments %}
+  <a class="card" href="{{ url_for('faculty.class_detail', section_id=a.section_id) }}">
+    <h2 style="font-size:1.25rem;">{{ a.year_name }} · Section {{ a.section_name }}</h2>
+    <p style="margin-bottom: var(--s-3);">{{ class_path(a.branch_name, a.department_name, a.year_name, a.section_name) }}</p>
+    <p class="muted num">{{ a.student_count }} student(s)</p>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">
+  {% call empty_state('You have no active class assignments yet.', 'layers') %}
+    <p>Request one below; Admin must approve it.</p>
+    <a class="btn" href="#request-class">Request a class</a>
+  {% endcall %}
+</div>
+{% endif %}
+
+<section class="card" id="request-class" aria-labelledby="req-h" style="margin-top: var(--s-5);">
+  <div class="card-head"><h2 id="req-h">Request a new class</h2></div>
+  <form method="post" action="{{ url_for('faculty.request_class') }}">
+    {% if academic_tree %}
+      {{ academic_picker(academic_tree) }}
+    {% else %}
+      <div class="notice notice-warn">{{ icon('alert', 20) }}<p>Admin has not created any classes yet, so there is nothing to request.</p></div>
+    {% endif %}
+    <div class="field form-narrow"><label for="note">Note to Admin (optional)</label><textarea id="note" name="note" rows="2" maxlength="500"></textarea></div>
+    <button class="btn" type="submit">Send request</button>
+  </form>
+</section>
+
+<section class="card card-flush" aria-labelledby="myreq-h">
+  <div class="card-head"><h2 id="myreq-h">My requests</h2></div>
+  {% if requests_list %}
+  <div class="table-wrap">
+  <table class="table-stack">
+    <thead><tr><th scope="col">Class</th><th scope="col">Status</th><th scope="col">Submitted</th></tr></thead>
+    <tbody>
+    {% for r in requests_list %}
+    <tr><td data-label="Class">{{ class_path(r.branch_name, r.department_name, r.year_name, r.section_name) }}</td><td data-label="Status">{{ status_pill(r.status) }}</td><td data-label="Submitted">{{ r.created_at }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<div style="padding: 0 1.4rem 1.4rem;"><p class="muted">No requests yet.</p></div>{% endif %}
+</section>
+{% endblock %}

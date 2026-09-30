@@ -1,0 +1,56 @@
+# Render Blueprint for the Campus Connect BACKEND (Flask + SQLite, server-rendered).
+# The Vercel project (vercel.json) serves /static and proxies everything else to this service.
+#
+# A persistent disk requires a PAID instance type (starter or higher). On the free plan the
+# filesystem is ephemeral and the SQLite database + uploads are wiped on every deploy/restart.
+services:
+  - type: web
+    name: campus-connect
+    runtime: python
+    plan: starter
+    region: oregon
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    # EXACTLY ONE worker (in-process APScheduler job + SQLite single writer); concurrency via threads.
+    startCommand: gunicorn wsgi:app -c gunicorn.conf.py --workers 1 --threads 4
+    healthCheckPath: /healthz
+    disk:
+      name: campus-connect-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: APP_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_PATH
+        value: /var/data/campusconnect.db
+      - key: UPLOAD_ROOT
+        value: /var/data/uploads
+      # Honour X-Forwarded-* from Vercel/Render (public host = the Vercel domain).
+      - key: TRUST_PROXY
+        value: "1"
+      # Proxies in front of the app: Vercel (rewrite) + Render's load balancer = 2.
+      # Use "1" if you point a custom domain straight at Render and skip Vercel.
+      - key: TRUST_PROXY_HOPS
+        value: "2"
+      # First-admin bootstrap. Fill ADMIN_* in the Render dashboard (values are NOT stored here).
+      - key: BOOTSTRAP_ADMIN
+        value: "1"
+      - key: ADMIN_NAME
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # Signup OTP is displayed on screen (demo). Set to "0" once SMTP delivery is configured.
+      - key: SHOW_DEMO_OTP
+        value: "1"
+      - key: REMINDER_INTERVAL_MINUTES
+        value: "60"
+      # Optional SMTP: add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_TLS
+      # in the Render dashboard (Environment tab) when you want e-mail. They are intentionally not
+      # declared here so the Blueprint does not prompt for values you do not have.

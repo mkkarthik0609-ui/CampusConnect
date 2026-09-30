@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_pill, empty_state %}
+{% block title %}My Meetings - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>My Meeting Requests</h1><p class="page-sub">Faculty reply with a time in their own words. Mark a meeting completed once it has happened.</p></div>
+</div>
+
+<nav class="tabs" aria-label="Filter meetings by status">
+  <a href="{{ url_for('meetings.list_meetings') }}"{% if not status_filter %} aria-current="page"{% endif %}>All</a>
+  {% for s in ['PENDING', 'ACCEPTED', 'COMPLETED', 'REJECTED', 'CANCELLED'] %}
+  <a href="{{ url_for('meetings.list_meetings', status=s) }}"{% if status_filter == s %} aria-current="page"{% endif %}>{{ s|lower|capitalize }}</a>
+  {% endfor %}
+</nav>
+
+<div class="card card-flush">
+  {% if meetings %}
+    <div class="table-wrap">
+    <table class="table-stack">
+      <thead><tr><th scope="col">Faculty</th><th scope="col">Reason</th><th scope="col">Status</th><th scope="col">Timing</th><th scope="col">Requested</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>
+      {% for m in meetings %}
+        <tr>
+          <td data-label="Faculty">{{ m.faculty_name }} <span class="id-tag">{{ m.faculty_code }}</span></td>
+          <td data-label="Reason">{{ m.reason }}</td>
+          <td data-label="Status">{{ status_pill(m.status) }}</td>
+          <td data-label="Timing">{{ m.meeting_time_text or '—' }}</td>
+          <td data-label="Requested">{{ m.requested_at }}</td>
+          <td class="cell-actions">
+            <div class="cluster" style="justify-content:flex-end;">
+            {% if m.status == 'ACCEPTED' %}
+              <form class="inline" method="post" action="{{ url_for('meetings.complete', meeting_id=m.id) }}">
+                <button class="btn btn-sm" type="submit">Mark Completed</button>
+              </form>
+            {% endif %}
+            {% if m.status in ('PENDING', 'ACCEPTED') %}
+              <form class="inline" method="post" action="{{ url_for('meetings.cancel', meeting_id=m.id) }}" data-prompt-reason="Please provide a reason for cancelling this meeting:" data-prompt-required>
+                <input type="hidden" name="reason" class="cancel-reason">
+                <button class="btn btn-muted btn-sm" type="submit">Cancel</button>
+              </form>
+            {% endif %}
+            </div>
+            {% if m.faculty_response %}
+              <div class="small muted" style="margin-top:0.3rem;">"{{ m.faculty_response }}"</div>
+            {% endif %}
+            {% if m.status == 'CANCELLED' and m.cancellation_reason %}
+              <div class="small muted">Reason: {{ m.cancellation_reason }}</div>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    {% call empty_state('No meeting requests yet.', 'calendar') %}
+      <p>Request a meeting from a faculty member listed on your dashboard or from Find Faculty.</p>
+      <div class="cluster"><a class="btn" href="{{ url_for('student.dashboard') }}">Go to dashboard</a><a class="btn btn-outline" href="{{ url_for('supporting.search_faculty') }}">Find faculty</a></div>
+    {% endcall %}
+  {% endif %}
+</div>
+{% endblock %}

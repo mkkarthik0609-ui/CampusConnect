@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_pill, empty_state %}
+{% block title %}Approvals - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Permission Requests</h1>
+    <p class="page-sub">Admin reviews faculty profile-change requests only; student changes are reviewed by their class faculty.</p>
+  </div>
+</div>
+<div class="card card-flush">
+  {% if requests_list %}
+  <div class="table-wrap">
+  <table class="table-stack">
+    <thead><tr><th scope="col">Requester</th><th scope="col">Type</th><th scope="col">Changes</th><th scope="col">Status</th><th scope="col">Submitted</th><th scope="col"><span class="sr-only">Decision</span></th></tr></thead>
+    <tbody>
+    {% for r in requests_list %}
+      <tr>
+        <td data-label="Requester"><strong>{{ r.requester_name }}</strong></td>
+        <td data-label="Type">{{ r.request_type }}</td>
+        <td data-label="Changes">{{ r.requested_changes }}</td>
+        <td data-label="Status">{{ status_pill(r.status) }}</td>
+        <td data-label="Submitted">{{ r.created_at }}</td>
+        <td class="cell-actions">
+          {% if r.status == 'PENDING' and r.request_type == 'FACULTY_PROFILE_CHANGE' %}
+            <form class="inline" method="post" action="{{ url_for('admin.decide_permission_request', request_id=r.id) }}">
+              <button class="btn btn-sm" type="submit" name="decision" value="approve">Approve</button>
+              <button class="btn btn-muted btn-sm" type="submit" name="decision" value="reject">Reject</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}{{ empty_state('No permission requests.', 'check-circle') }}{% endif %}
+</div>
+{% endblock %}

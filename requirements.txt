@@ -1,0 +1,7 @@
+# Runtime dependencies only (what Render installs). Dev/test tools live in requirements-dev.txt.
+Flask==3.0.3
+Werkzeug==3.0.4
+Flask-WTF==1.2.1
+python-dotenv==1.0.1
+APScheduler==3.10.4
+gunicorn==23.0.0

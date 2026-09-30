@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_macros.html" import avatar, class_path, icon, empty_state %}
+{% block title %}Students - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>All Students</h1>
+    <p class="page-sub">A student cannot change their own class. If one registered in the wrong class, remove the registration — they can then register again.</p>
+  </div>
+</div>
+<div class="card card-flush">
+  {% if students %}
+  <div class="table-wrap">
+  <table class="table-stack">
+    <thead><tr><th scope="col">Name</th><th scope="col">USN</th><th scope="col">Class</th><th scope="col">College Email</th><th scope="col">Phone</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>
+    {% for s in students %}
+      <tr>
+        <td data-label="Name"><span class="cluster" style="flex-wrap:nowrap;">{{ avatar(s.full_name, size='avatar-sm') }}<strong>{{ s.full_name }}</strong></span></td>
+        <td data-label="USN"><span class="id-tag">{{ s.usn }}</span></td>
+        <td data-label="Class">{% if s.section_id %}{{ class_path(s.branch, s.department, s.year, s.section) }}{% else %}<span class="status status-PENDING">Unmapped</span> <span class="muted small">{{ s.branch }} {{ s.department }} {{ s.year }} {{ s.section }}</span>{% endif %}</td>
+        <td data-label="College Email">{{ s.college_email }}</td><td data-label="Phone">{{ s.phone }}</td>
+        <td data-label="Status">{% if s.is_active %}<span class="status status-ACTIVE">Active</span>{% else %}<span class="status status-CANCELLED">Removed</span>{% endif %}</td>
+        <td class="cell-actions">
+          {% if s.is_active %}
+          <form class="inline" method="post" action="{{ url_for('admin_academic.remove_student_registration', student_id=s.id) }}" data-confirm="Remove this registration so the student can register again? Their chats and history are kept.">
+            <button class="btn btn-muted btn-sm">Remove registration</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}{{ empty_state('No students have registered yet.', 'users') }}{% endif %}
+</div>
+{% endblock %}

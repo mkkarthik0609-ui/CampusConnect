@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "_macros.html" import avatar, status_pill, class_path, empty_state %}
+{% block title %}My Profile - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>My Profile</h1><p class="page-sub">Changes to your department or email go through Admin approval.</p></div></div>
+<div class="grid grid-2" style="align-items:start;">
+  <div class="card">
+    <div class="profile-photo">
+      {{ avatar(faculty.full_name, faculty.profile_picture_path, 'avatar-lg', 'Profile picture of ' ~ faculty.full_name) }}
+      <form method="post" action="{{ url_for('faculty.update_picture') }}" enctype="multipart/form-data">
+        <label for="profile_picture" class="sr-only">Choose a new profile picture</label>
+        <input id="profile_picture" type="file" name="profile_picture" accept="image/*" capture="environment" required>
+        <button class="btn btn-sm" type="submit">Update Picture</button>
+      </form>
+    </div>
+    <dl class="kv">
+      <dt>Full Name</dt><dd>{{ faculty.full_name }}</dd>
+      <dt>Faculty ID</dt><dd><span class="id-tag">{{ faculty.faculty_code }}</span></dd>
+      <dt>Department</dt><dd>{{ faculty.department }}</dd>
+      <dt>Professional Email</dt><dd>{{ faculty.professional_email }}</dd>
+      <dt>Subjects</dt><dd>{{ subjects|map(attribute='subject_name')|join(', ') }}</dd>
+      <dt>Classes</dt><dd>{% for c in classes %}<p>{{ class_path(c.branch_name, c.department_name, c.year_name, c.section_name) }}</p>{% else %}<span class="muted">No classes assigned yet.</span>{% endfor %}</dd>
+    </dl>
+  </div>
+
+  <div class="stack-lg">
+    <section class="card">
+      <div class="card-head"><h2>Request a Profile Change</h2></div>
+      <p class="muted small">Any change must be approved by an admin before it takes effect.</p>
+      <form method="post" action="{{ url_for('faculty.request_profile_change') }}">
+        <div class="field"><label for="department">Department</label><select id="department" name="department"><option value="">Keep {{ faculty.department }}</option>{% for d in departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="professional_email">Professional Email</label><input id="professional_email" name="professional_email" placeholder="{{ faculty.professional_email }}"></div>
+        <div class="field"><label for="reason">Reason</label><textarea id="reason" name="reason" rows="2"></textarea></div>
+        <button class="btn" type="submit">Submit Request</button>
+      </form>
+    </section>
+
+    <section class="card card-flush">
+      <div class="card-head"><h2>Your Requests</h2></div>
+      {% if pending_requests %}
+      <div class="table-wrap">
+        <table class="table-stack">
+          <thead><tr><th scope="col">Type</th><th scope="col">Status</th><th scope="col">Submitted</th></tr></thead>
+          <tbody>
+          {% for r in pending_requests %}
+            <tr><td data-label="Type">{{ r.request_type }}</td><td data-label="Status">{{ status_pill(r.status) }}</td><td data-label="Submitted">{{ r.created_at }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <div style="padding: 0 1.4rem 1.4rem;"><p class="muted">No change requests yet.</p></div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

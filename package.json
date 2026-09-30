@@ -1,0 +1,13 @@
+{
+  "name": "campus-connect-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vercel static-asset + proxy project for the Campus Connect Flask backend (hosted on Render).",
+  "scripts": {
+    "build": "node scripts/build-frontend.mjs",
+    "set-backend-url": "node scripts/set-backend-url.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

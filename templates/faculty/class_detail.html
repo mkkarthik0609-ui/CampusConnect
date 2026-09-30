@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_macros.html" import avatar, empty_state, combo_path, icon %}
+{% block title %}Class - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="path-title">{{ combo_path(combo, 'class-path-lg') }}</h1>
+    <p class="page-sub">Students registered in this class. You can message any of them.</p>
+  </div>
+  <div class="page-actions"><a class="btn btn-outline" href="{{ url_for('faculty.classes') }}">My classes</a></div>
+</div>
+<div class="layout-main-side">
+  <div class="card card-flush">
+    <div class="card-head"><h2>Students ({{ students|length }})</h2></div>
+    <div class="table-wrap">
+    <table class="table-stack">
+      <thead><tr><th scope="col">USN</th><th scope="col">Name</th><th scope="col">Email</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>
+      {% for s in students %}
+      <tr>
+        <td data-label="USN"><span class="id-tag">{{ s.usn }}</span></td><td data-label="Name"><strong>{{ s.full_name }}</strong></td><td data-label="Email">{{ s.college_email }}</td>
+        <td class="cell-actions"><a class="btn btn-sm" href="{{ url_for('chat.open_with_student', student_id=s.id) }}">{{ icon('chat', 16) }}Message</a></td>
+      </tr>
+      {% else %}<tr><td colspan="4" class="muted">No students have registered in this class yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Faculty assigned to this class</h2></div>
+    <ul class="row-list">
+      {% for f in co_faculty %}<li class="row-item">{{ avatar(f.full_name) }}<div class="row-main"><div class="row-title">{{ f.full_name }}</div><div class="row-sub">{{ f.faculty_code }} — {{ f.full_name }}</div></div></li>{% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

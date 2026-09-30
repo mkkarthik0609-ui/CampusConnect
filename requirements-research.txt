@@ -1,0 +1,4 @@
+# OPTIONAL: scheduling research experiment only (python research/run_experiment.py).
+# Not installed in production or CI. pandas is listed in older docs but no code imports it,
+# so only matplotlib (used for the result charts) is required.
+matplotlib==3.9.2

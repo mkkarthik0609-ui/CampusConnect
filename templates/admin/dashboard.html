@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Admin Dashboard - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Admin Dashboard</h1>
+    <p class="page-sub">Who is registered, which classes exist, and what is waiting for a decision.</p>
+  </div>
+</div>
+
+<div class="layout-main-side">
+  <div class="stack-lg">
+    <section class="card" aria-labelledby="attention-h">
+      <div class="card-head"><h2 id="attention-h">Needs your attention</h2></div>
+      <ul class="attention-list">
+        <li>
+          <a class="attention-item {{ 'is-hot' if pending_assignment_count }}" href="{{ url_for('admin_academic.assignment_requests') }}">
+            <span class="attention-count">{{ pending_assignment_count }}</span>
+            <span class="attention-text">Class requests pending<small>Faculty asking to be assigned to a class</small></span>
+            {{ icon('chevron', 18) }}
+          </a>
+        </li>
+        <li>
+          <a class="attention-item {{ 'is-hot' if pending_permission_count }}" href="{{ url_for('admin.permission_requests') }}">
+            <span class="attention-count">{{ pending_permission_count }}</span>
+            <span class="attention-text">Profile approvals pending<small>Faculty profile changes waiting for review</small></span>
+            {{ icon('chevron', 18) }}
+          </a>
+        </li>
+        <li>
+          <a class="attention-item {{ 'is-hot' if unmapped_student_count }}" href="{{ url_for('admin.students') }}">
+            <span class="attention-count">{{ unmapped_student_count or 0 }}</span>
+            <span class="attention-text">Unmapped students<small>{% if unmapped_student_count %}{{ unmapped_student_count }} student(s) are not linked to an Admin-defined class. Review them under Students.{% else %}Every student is linked to a class.{% endif %}</small></span>
+            {{ icon('chevron', 18) }}
+          </a>
+        </li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="figures-h">
+      <h2 id="figures-h" class="sr-only">Totals</h2>
+      <div class="figures figures-2">
+        <a class="stat" href="{{ url_for('admin.students') }}"><div class="value">{{ student_count }}</div><div class="label">Students</div></a>
+        <a class="stat" href="{{ url_for('admin.faculty') }}"><div class="value">{{ faculty_count }}</div><div class="label">Faculty</div></a>
+        <a class="stat" href="{{ url_for('admin_academic.classes') }}"><div class="value">{{ class_count }}</div><div class="label">Active classes</div></a>
+        <a class="stat" href="{{ url_for('admin.meetings') }}"><div class="value">{{ meeting_count }}</div><div class="label">Meetings</div></a>
+      </div>
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="manage-h">
+    <div class="card-head"><h2 id="manage-h">Manage</h2></div>
+    <ul class="link-rows">
+      <li><a href="{{ url_for('admin_academic.academics') }}">{{ icon('layers', 22) }}<span class="link-text"><span class="link-title">Academic structure</span><span class="link-desc">Branches, departments, years and sections.</span></span>{{ icon('chevron', 16) }}</a></li>
+      <li><a href="{{ url_for('admin_academic.assignments') }}">{{ icon('link', 22) }}<span class="link-text"><span class="link-title">Faculty assignments</span><span class="link-desc">Assign faculty to classes; see who teaches what.</span></span>{{ icon('chevron', 16) }}</a></li>
+      <li><a href="{{ url_for('admin_academic.classes') }}">{{ icon('grid', 22) }}<span class="link-text"><span class="link-title">Class directory</span><span class="link-desc">Every class with its students and faculty.</span></span>{{ icon('chevron', 16) }}</a></li>
+      <li><a href="{{ url_for('admin.chats') }}">{{ icon('chat', 22) }}<span class="link-text"><span class="link-title">Monitor chats</span><span class="link-desc">View all Mentor-Connect conversations for oversight.</span></span>{{ icon('chevron', 16) }}</a></li>
+    </ul>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,48 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets / local config (never commit)
+.env
+.dev_secret_key
+.env.*
+!.env.example
+
+# SQLite databases - the DB file must NEVER be committed
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+backups/
+
+# User uploads: ignore contents, keep the directory skeleton via .gitkeep
+uploads/**
+!uploads/
+!uploads/.gitkeep
+!uploads/profile/
+!uploads/profile/students/
+!uploads/profile/students/.gitkeep
+!uploads/profile/faculty/
+!uploads/profile/faculty/.gitkeep
+!uploads/chat/
+!uploads/chat/.gitkeep
+
+# Frontend (Vercel) build output and tooling
+node_modules/
+public/
+.vercel/
+
+# Tooling / editor
+graphify-out/
+.claude/
+.idea/
+.vscode/
+*.log

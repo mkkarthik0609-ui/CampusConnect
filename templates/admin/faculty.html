@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_macros.html" import avatar, empty_state %}
+{% block title %}Faculty - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>All Faculty</h1><p class="page-sub">Registered faculty, their subjects and the classes they teach.</p></div>
+  <div class="page-actions"><a class="btn btn-outline" href="{{ url_for('admin_academic.assignments') }}">Faculty assignments</a></div>
+</div>
+<div class="card card-flush">
+  {% if faculty_list %}
+  <div class="table-wrap">
+  <table class="table-stack">
+    <thead><tr><th scope="col">Name</th><th scope="col">Faculty ID</th><th scope="col">Department</th><th scope="col">Email</th><th scope="col">Subjects</th><th scope="col">Classes</th></tr></thead>
+    <tbody>
+    {% for item in faculty_list %}
+      <tr>
+        <td data-label="Name"><span class="cluster" style="flex-wrap:nowrap;">{{ avatar(item.row.full_name, size='avatar-sm') }}<strong>{{ item.row.full_name }}</strong></span></td>
+        <td data-label="Faculty ID"><span class="id-tag">{{ item.row.faculty_code }}</span></td><td data-label="Department">{{ item.row.department }}</td>
+        <td data-label="Email">{{ item.row.professional_email }}</td>
+        <td data-label="Subjects">{{ item.subjects|map(attribute='subject_name')|join(', ') }}</td>
+        <td data-label="Classes">{% for c in item.classes %}{{ c.branch }} {{ c.year }}{{ c.section }}{% if not loop.last %}, {% endif %}{% else %}<span class="muted">None yet</span>{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}{{ empty_state('No faculty have registered yet.', 'book') }}{% endif %}
+</div>
+{% endblock %}

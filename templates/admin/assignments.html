@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "_macros.html" import academic_picker, icon, avatar, empty_state, combo_path %}
+{% block title %}Faculty Assignments - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Faculty Assignments</h1>
+    <p class="page-sub">Faculty can only access students of the classes you assign here.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-outline" href="{{ url_for('admin_academic.assignment_requests') }}">Requests{% if pending_count %} ({{ pending_count }} pending){% endif %}</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head"><h2>Assign faculty to a class</h2></div>
+  <form method="post" action="{{ url_for('admin_academic.assign') }}">
+    <div class="field form-narrow">
+      <label for="faculty_id">Faculty</label>
+      <select id="faculty_id" name="faculty_id" required>
+        <option value="">Select faculty</option>
+        {% for fr in faculty_rows %}<option value="{{ fr.row.id }}">{{ fr.row.faculty_code }} — {{ fr.row.full_name }}</option>{% endfor %}
+      </select>
+    </div>
+    {% if academic_tree %}
+      {{ academic_picker(academic_tree) }}
+    {% else %}
+      <div class="notice notice-warn">{{ icon('alert', 20) }}<p>No academic structure exists yet. Create branches, departments, years and sections under Academics first.</p></div>
+    {% endif %}
+    <button class="btn" type="submit">Assign</button>
+  </form>
+</div>
+
+<h2 class="sr-only">Current assignments by faculty</h2>
+{% for fr in faculty_rows %}
+<section class="card">
+  <div class="section-title">
+    <div class="row-item" style="padding:0;border:0;">
+      {{ avatar(fr.row.full_name) }}
+      <div class="row-main">
+        <h3 style="margin:0;">{{ fr.row.faculty_code }} — {{ fr.row.full_name }}</h3>
+        <span class="muted small">{{ fr.row.department }}</span>
+      </div>
+    </div>
+    {% if fr.pending %}<span class="status status-PENDING">{{ fr.pending|length }} pending request(s)</span>{% endif %}
+  </div>
+  {% if fr.assignments %}
+  <div class="table-wrap">
+  <table class="table-stack">
+    <thead><tr><th scope="col">Branch</th><th scope="col">Department</th><th scope="col">Year</th><th scope="col">Section</th><th scope="col">Students</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>
+    {% for a in fr.assignments %}
+    <tr>
+      <td data-label="Branch">{{ a.branch_name }}</td><td data-label="Department">{{ a.department_name }}</td><td data-label="Year">{{ a.year_name }}</td><td data-label="Section">{{ a.section_name }}</td><td data-label="Students">{{ a.student_count }}</td>
+      <td class="cell-actions">
+        <form class="inline" method="post" action="{{ url_for('admin_academic.remove_assignment', assignment_id=a.assignment_id) }}" data-confirm="Remove this assignment? The faculty member immediately loses access to this class.">
+          <button class="btn btn-muted btn-sm">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="muted">No active assignments.</p>{% endif %}
+</section>
+{% else %}
+<div class="card">{{ empty_state('No faculty have registered yet.', 'users') }}</div>
+{% endfor %}
+{% endblock %}

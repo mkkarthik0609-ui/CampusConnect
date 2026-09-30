@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "_macros.html" import academic_picker, steps, icon %}
+{% block title %}Complete Registration - Campus Connect{% endblock %}
+{% block content %}
+<div class="auth-wrap auth-wide">
+  <div class="auth-card">
+    {{ steps(3) }}
+    <h1>Complete Your Registration</h1>
+    <p class="auth-lead">Step 3 of 3 — verified email: <strong>{{ email }}</strong></p>
+    <div class="card-surface">
+      <form method="post">
+        <input type="hidden" name="college_email" value="{{ email }}">
+        <div class="grid grid-2">
+          <div class="field"><label for="full_name">Full Name</label><input id="full_name" name="full_name" value="{{ form.get('full_name', '') }}" required autocomplete="name"></div>
+          <div class="field"><label for="usn">USN</label><input id="usn" name="usn" value="{{ form.get('usn', '') }}" required autocapitalize="characters" spellcheck="false"></div>
+          <div class="field"><label for="phone">Phone</label><input id="phone" name="phone" type="tel" value="{{ form.get('phone', '') }}" required autocomplete="tel"></div>
+          <div class="field"><label for="personal_email">Personal Email</label><input id="personal_email" type="email" name="personal_email" value="{{ form.get('personal_email', '') }}" required autocomplete="email"></div>
+        </div>
+
+        <div class="form-section">
+          <h2>Your class</h2>
+          <p class="muted small">Choose carefully — you cannot change this yourself later. If you pick the wrong class, contact Admin to remove the registration and register again.</p>
+          {% if academic_tree %}
+            {{ academic_picker(academic_tree) }}
+          {% else %}
+            <div class="notice notice-danger" role="alert">{{ icon('alert', 20) }}<p>Admin has not created any classes yet. Please try again later.</p></div>
+          {% endif %}
+        </div>
+
+        <div class="form-section">
+          <h2>Password</h2>
+          <div class="grid grid-2">
+            <div class="field"><label for="password">Campus Connect Password</label><input id="password" type="password" name="password" minlength="8" autocomplete="new-password" required aria-describedby="pw-hint"><span class="hint" id="pw-hint">At least 8 characters.</span></div>
+            <div class="field"><label for="confirm_password">Confirm Password</label><input id="confirm_password" type="password" name="confirm_password" minlength="8" autocomplete="new-password" required></div>
+          </div>
+        </div>
+        <button class="btn btn-block" type="submit">Create Account</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

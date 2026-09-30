@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, empty_state, avatar, combo_path %}
+{% block title %}Class Directory - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Class Directory</h1>
+    <p class="page-sub">Every academic combination with the faculty currently assigned to it.</p>
+  </div>
+  <div class="page-actions"><a class="btn btn-outline" href="{{ url_for('admin_academic.assignments') }}">Assign faculty</a></div>
+</div>
+
+{% if directory %}
+<div class="field form-narrow">
+  <label for="class-filter">Filter classes</label>
+  <input id="class-filter" type="search" placeholder="e.g. AIML 3rd Year" data-filter-input="class-grid" autocomplete="off">
+  <span class="hint" aria-live="polite" data-filter-count="class-grid"></span>
+</div>
+<div class="grid grid-classes" id="class-grid">
+  {% for row in directory %}
+  {% set c = row.combo %}
+  <section class="card" data-filter-text="{{ c.branch_name }} {{ c.department_name }} {{ c.year_name }} {{ c.section_name }}" aria-label="{{ c.branch_name }} {{ c.department_name }} {{ c.year_name }} {{ c.section_name }}">
+    <div class="card-head">
+      <h2 class="class-heading" style="font-family:var(--font-body);font-size:1.0625rem;">
+        <a href="{{ url_for('admin_academic.class_detail', section_id=c.section_id) }}">{{ combo_path(c) }}</a>
+        {% if not c.chain_active %}<span class="status status-CANCELLED">Inactive</span>{% endif %}
+      </h2>
+    </div>
+    <p class="muted small num" style="margin-bottom: var(--s-3);">{{ c.student_count }} student(s) · {{ c.faculty_count }} faculty</p>
+    {% if row.faculty %}
+      <ul class="plain-list">
+        {% for f in row.faculty %}<li class="row-item" style="padding:0.4rem 0;border:0;">{{ avatar(f.full_name, size='avatar-sm') }}<span class="row-main"><span class="row-title">{{ f.full_name }}</span> <span class="id-tag">{{ f.faculty_code }}</span><span class="sr-only"> — {{ f.faculty_code }} — {{ f.full_name }}</span></span></li>{% endfor %}
+      </ul>
+    {% else %}<p class="muted small">No faculty assigned.</p>{% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">
+  {% call empty_state('No classes yet.', 'grid') %}
+    <p>Create them under Academic Structure.</p>
+    <a class="btn" href="{{ url_for('admin_academic.academics') }}">Open Academic Structure</a>
+  {% endcall %}
+</div>
+{% endif %}
+{% endblock %}

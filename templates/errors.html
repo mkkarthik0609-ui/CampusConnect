@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% set headings = {
+  400: 'That request did not look right',
+  403: 'You do not have access here',
+  404: 'We could not find that page',
+  413: 'That file is too large',
+  500: 'Something went wrong on our side'
+} %}
+{% block title %}{{ code }} - Campus Connect{% endblock %}
+{% block content %}
+<section class="errors-page" aria-labelledby="error-title">
+  <p class="code" aria-hidden="true">{{ code }}</p>
+  <h1 id="error-title"><span class="sr-only">Error {{ code }}: </span>{{ headings.get(code, 'Something went wrong') }}</h1>
+  <p>{{ message }}</p>
+  <div class="cluster">
+    {% if current_user_role %}
+      <a class="btn" href="{{ url_for('index') }}">Back to dashboard</a>
+    {% else %}
+      <a class="btn" href="{{ url_for('index') }}">Go to sign in</a>
+    {% endif %}
+    <a class="btn btn-outline" href="{{ url_for('index') }}" data-history-back hidden>Go back</a>
+  </div>
+</section>
+{% endblock %}

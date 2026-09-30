@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_macros.html" import steps %}
+{% block title %}Verify OTP - Campus Connect{% endblock %}
+{% block content %}
+<div class="auth-wrap">
+  <div class="auth-card">
+    {{ steps(2) }}
+    <h1>Verify Your Email</h1>
+    <p class="auth-lead">Step 2 of 3 — enter the 6-digit code for <strong>{{ email }}</strong>. The demo code is shown at the top of this page.</p>
+    <div class="card-surface">
+      <form method="post">
+        <input type="hidden" name="email" value="{{ email }}">
+        <div class="field">
+          <label for="otp">OTP Code</label>
+          <input type="text" id="otp" name="otp" maxlength="6" minlength="6" pattern="[0-9]{6}" inputmode="numeric" autocomplete="one-time-code" required autofocus class="mono" aria-describedby="otp-hint">
+          <span class="hint" id="otp-hint">Six digits. The code is only displayed on screen for the demo.</span>
+        </div>
+        <button class="btn btn-block" type="submit">Verify</button>
+      </form>
+    </div>
+    <div class="auth-links"><span>No code, or it expired? <a href="{{ url_for('auth.signup_student_start') }}">Request a new OTP</a></span></div>
+  </div>
+</div>
+{% endblock %}

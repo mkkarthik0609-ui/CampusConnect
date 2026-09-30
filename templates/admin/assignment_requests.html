@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_pill, empty_state, class_path %}
+{% block title %}Class Requests - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Faculty Class Requests</h1>
+    <p class="page-sub">Approving a request assigns the faculty member to that class straight away.</p>
+  </div>
+  <div class="page-actions"><a class="btn btn-outline" href="{{ url_for('admin_academic.assignments') }}">Assignments</a></div>
+</div>
+<div class="card card-flush">
+  {% if requests_list %}
+  <div class="table-wrap">
+  <table class="table-stack">
+    <thead><tr><th scope="col">Faculty</th><th scope="col">Requested class</th><th scope="col">Note</th><th scope="col">Status</th><th scope="col">Submitted</th><th scope="col"><span class="sr-only">Decision</span></th></tr></thead>
+    <tbody>
+    {% for r in requests_list %}
+    <tr>
+      <td data-label="Faculty"><span class="id-tag">{{ r.faculty_code }}</span> — {{ r.faculty_name }}</td>
+      <td data-label="Requested class">{{ class_path(r.branch_name, r.department_name, r.year_name, r.section_name) }}</td>
+      <td data-label="Note">{{ r.note or '—' }}</td>
+      <td data-label="Status">{{ status_pill(r.status) }}</td>
+      <td data-label="Submitted">{{ r.created_at }}</td>
+      <td class="cell-actions">
+        {% if r.status == 'PENDING' %}
+        <form class="inline" method="post" action="{{ url_for('admin_academic.decide_assignment_request', request_id=r.id) }}">
+          <button class="btn btn-sm" name="decision" value="approve">Approve</button>
+          <button class="btn btn-muted btn-sm" name="decision" value="reject">Reject</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}{{ empty_state('No requests yet.', 'inbox') }}{% endif %}
+</div>
+{% endblock %}

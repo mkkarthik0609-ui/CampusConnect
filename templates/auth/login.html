@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Sign in - Campus Connect{% endblock %}
+{% block content %}
+<div class="auth-wrap">
+  <div class="auth-card">
+    <h1>Sign in</h1>
+    <p class="auth-lead">Use your email, Faculty ID or USN with your Campus Connect password.</p>
+    <div class="card-surface">
+      <form method="post">
+        <div class="field">
+          <label for="email">Email, Faculty ID or USN</label>
+          <input type="text" id="email" name="email" required autofocus autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="login-id-hint">
+          <span class="hint" id="login-id-hint">Students can use their USN, faculty their Faculty ID, and everyone their email.</span>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required autocomplete="current-password">
+        </div>
+        <button class="btn btn-block" type="submit">Sign in</button>
+      </form>
+    </div>
+    <div class="auth-links">
+      <span>New student? <a href="{{ url_for('auth.signup_student_start') }}">Create a student account</a></span>
+      <span>New faculty? <a href="{{ url_for('auth.signup_faculty') }}">Register as faculty</a></span>
+    </div>
+  </div>
+</div>
+{% endblock %}

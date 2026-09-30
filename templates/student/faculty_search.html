@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_macros.html" import avatar, icon, empty_state %}
+{% block title %}Find Faculty - Campus Connect{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Find Faculty</h1><p class="page-sub">Ask a faculty member outside your class to be your supporting faculty.</p></div></div>
+<div class="card">
+  <form method="get" class="inline-form" role="search">
+    <div class="field" style="flex:1 1 18rem;margin:0;">
+      <label for="q">Search by Faculty ID or Name</label>
+      <input id="q" name="q" value="{{ query }}" placeholder="e.g. FAC101 or Dr. Rao" autofocus>
+    </div>
+    <button class="btn" type="submit" style="align-self:flex-end;">{{ icon('search', 18) }}Search</button>
+  </form>
+</div>
+
+{% if results %}
+<div class="card card-flush">
+  <div class="table-wrap">
+  <table class="table-stack">
+    <thead><tr><th scope="col">Name</th><th scope="col">Faculty ID</th><th scope="col">Department</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>
+    {% for f in results %}
+      <tr>
+        <td data-label="Name"><span class="cluster" style="flex-wrap:nowrap;">{{ avatar(f.full_name, size='avatar-sm') }}<strong>{{ f.full_name }}</strong></span></td><td data-label="Faculty ID"><span class="id-tag">{{ f.faculty_code }}</span></td><td data-label="Department">{{ f.department }}</td>
+        <td class="cell-actions">
+          <form class="inline" method="post" action="{{ url_for('supporting.request_faculty', faculty_id=f.id) }}">
+            <button class="btn btn-sm" type="submit">Request Supporting Faculty</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% elif query %}
+<div class="card">{{ empty_state('No faculty found for "' ~ query ~ '".', 'search') }}</div>
+{% endif %}
+{% endblock %}

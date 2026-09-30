@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "border-accent-on-rounded",
+        "value": "*",
+        "files": [
+          "static/css/style.css"
+        ],
+        "createdAt": "2026-09-30T18:19:28.695Z",
+        "reason": "assistant: .steps li uses border-top as a step-progress rule on a non-rounded element; no border-radius applies (checked lines 622-626)"
+      }
+    ]
+  }
+}
