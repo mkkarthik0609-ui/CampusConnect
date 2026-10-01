@@ -13,6 +13,7 @@ from api.main import create_app
 from tests.conftest import (
     PASSWORD, api_login, api_post, csrf_token, db_all, db_count, db_one, find_section, http_faculty_signup,
     http_student_signup, login_client, make_admin, make_settings, register_faculty, register_student, assign, unassign,
+    solve_captcha,
 )
 
 PNG = base64.b64decode(
@@ -38,41 +39,34 @@ def anon(app):
 # signup + login
 # ---------------------------------------------------------------------------
 
-def test_student_signup_otp_register_then_login_by_email_and_usn(app, client, campus):
-    # step 1: start -> demo OTP is returned because there is no SMTP configured
+def test_student_signup_then_login_by_email_and_usn(app, client, campus):
     email = "e2e.student@college.edu"
-    start = api_post(client, "/api/auth/signup/student/start", json={"college_email": email})
-    assert start.status_code == 200
-    body = start.json()
-    assert body["ok"] and body["delivery"] == "demo" and len(body["demo_otp"]) == 6
-
-    # registering before verifying the OTP is refused
     payload = {"college_email": email, "full_name": "E2E Student", "usn": "1AB21CS500",
                "section_id": campus["sid"], "phone": "9876543210", "personal_email": "e2e@example.com",
                "password": PASSWORD, "confirm_password": PASSWORD}
-    early = api_post(client, "/api/auth/signup/student/register", json=payload)
-    assert early.status_code == 403 and err(early)["code"] == "otp_not_verified"
 
-    # a wrong OTP is a field error, the right one verifies
-    wrong = api_post(client, "/api/auth/signup/student/verify", json={"college_email": email, "otp": "000000"})
-    if body["demo_otp"] == "000000":  # pragma: no cover - 1 in a million
-        wrong = api_post(client, "/api/auth/signup/student/verify", json={"college_email": email, "otp": "111111"})
-    assert wrong.status_code == 400 and "otp" in err(wrong).get("fields", {})
-    verify = api_post(client, "/api/auth/signup/student/verify",
-                      json={"college_email": email, "otp": body["demo_otp"]})
-    assert verify.status_code == 200, verify.text
+    # no captcha / a wrong captcha: refused, nothing created
+    assert api_post(client, "/api/auth/signup/student", json=payload).status_code == 400
+    wrong = api_post(client, "/api/auth/signup/student", json={**payload, **solve_captcha(client),
+                                                                "captcha_answer": "WRONG1"})
+    assert wrong.status_code == 400 and "captcha" in err(wrong)["fields"]
+    assert db_count(app, "students") == 0
 
-    # step 3: register with the admin-defined section id
-    reg = api_post(client, "/api/auth/signup/student/register", json=payload)
+    # register with the admin-defined section id and a solved captcha
+    reg = api_post(client, "/api/auth/signup/student", json={**payload, **solve_captcha(client)})
     assert reg.status_code == 201, reg.text
     student = db_one(app, "SELECT * FROM students WHERE usn = '1AB21CS500'")
     assert student["section_id"] == campus["sid"]
     assert (student["branch"], student["department"], student["year"], student["section"]) == (
         "CSE", "AIML", "3rd Year", "A")
 
-    # the same OTP cannot be used to register a second account
-    again = api_post(client, "/api/auth/signup/student/register", json={**payload, "usn": "1AB21CS501"})
-    assert again.status_code in (400, 403)
+    # the same captcha cannot be reused for a second account
+    solved = solve_captcha(client)
+    assert api_post(client, "/api/auth/signup/student",
+                    json={**payload, "college_email": "second@college.edu", "usn": "1AB21CS502", **solved}).status_code == 201
+    again = api_post(client, "/api/auth/signup/student",
+                     json={**payload, "college_email": "third@college.edu", "usn": "1AB21CS501", **solved})
+    assert again.status_code == 400 and "captcha" in err(again)["fields"]
 
     # login by college email AND by USN (case-insensitive), each in a fresh browser
     by_email = TestClient(app)
@@ -89,19 +83,19 @@ def test_student_signup_otp_register_then_login_by_email_and_usn(app, client, ca
 
 def test_student_signup_validation_errors(app, client, campus):
     email = "bad.student@college.edu"
-    otp = api_post(client, "/api/auth/signup/student/start", json={"college_email": email}).json()["demo_otp"]
-    api_post(client, "/api/auth/signup/student/verify", json={"college_email": email, "otp": otp})
     base = {"college_email": email, "full_name": "Bad", "usn": "1AB21CS510", "section_id": campus["sid"],
             "phone": "9876543210", "personal_email": "b@example.com", "password": PASSWORD,
             "confirm_password": PASSWORD}
-    mismatch = api_post(client, "/api/auth/signup/student/register", json={**base, "confirm_password": "Other1!aaa"})
+    def signup(**over):  # every attempt needs its own (single-use) captcha
+        return api_post(client, "/api/auth/signup/student", json={**base, **solve_captcha(client), **over})
+
+    mismatch = signup(confirm_password="Other1!aaa")
     assert mismatch.status_code == 400 and "confirm_password" in err(mismatch)["fields"]
-    weak = api_post(client, "/api/auth/signup/student/register",
-                    json={**base, "password": "abc", "confirm_password": "abc"})
+    weak = signup(password="abc", confirm_password="abc")
     assert weak.status_code == 400
-    nosection = api_post(client, "/api/auth/signup/student/register", json={**base, "section_id": 999999})
+    nosection = signup(section_id=999999)
     assert nosection.status_code == 400
-    missing = api_post(client, "/api/auth/signup/student/register", json={"college_email": email})
+    missing = api_post(client, "/api/auth/signup/student", json={"college_email": email})
     assert missing.status_code == 400 and err(missing)["code"] == "validation_error"
     # nothing was created by the failed attempts
     assert db_count(app, "students") == 0

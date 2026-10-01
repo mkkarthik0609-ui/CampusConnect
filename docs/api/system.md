@@ -7,11 +7,8 @@ Public liveness/readiness probe (Render health check). Runs `SELECT 1`.
 ## `GET /api/meta`
 Public, non-sensitive.
 ```json
-{ "app": "Campus Connect", "demo_otp_enabled": true }
+{ "app": "Campus Connect" }
 ```
-`demo_otp_enabled` is true only when there is no SMTP configured and `SHOW_DEMO_OTP` is on; in that case
-`POST /api/auth/signup/student/start` returns `demo_otp` to show on screen. Otherwise the OTP is e-mailed (or, with
-neither channel, signup is unavailable: 503 `delivery_unavailable`).
 
 ## `GET /uploads/{path}`
 Authorised file serving (requires a session; 401 otherwise).

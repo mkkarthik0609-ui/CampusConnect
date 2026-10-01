@@ -122,12 +122,12 @@ Failed / successful login tracking used for throttling and temporary lockout:
 `(identifier, created_at)` and `(ip, created_at)`. Rows are only counted inside the lockout window
 (15 minutes, `LOGIN_WINDOW_MINUTES`).
 
-### `otp_sessions`
-One row per OTP generation attempt during student signup. Stores a **hash** of the
-6-digit code (`otp_hash`), an `expires_at` timestamp, `verified` flag, and
-`attempt_count` (capped by `Config.OTP_MAX_ATTEMPTS`). The plaintext OTP is returned
-once to the caller and displayed on screen (demo mode) or e-mailed when SMTP is configured — it is
-never persisted.
+### `captcha_challenges`
+One row per issued image captcha (created by `models/security_queries.ensure_schema`). Stores only an
+**HMAC** of the answer (`answer_hash`, keyed with `SECRET_KEY`), `expires_at` (5 minutes), the requesting `ip`
+and `created_at`. A row is deleted the first time it is checked (right or wrong), so each challenge gets exactly
+one guess. The plaintext answer is never persisted. (The former `otp_sessions` / `otp_requests` tables are
+dropped on start-up.)
 
 ### `permission_requests`
 Drives both approval workflows (student→faculty, faculty→admin) through one table.

@@ -54,12 +54,5 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      # Signup OTP is returned to the browser and shown on screen (demo mode). Set to "0" once
-      # SMTP delivery is configured.
-      - key: SHOW_DEMO_OTP
-        value: "1"
       - key: REMINDER_INTERVAL_MINUTES
         value: "60"
-      # Optional SMTP: add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_TLS in
-      # the Render dashboard (Environment tab) when you want e-mail. They are intentionally not
-      # declared here so the Blueprint does not prompt for values you do not have.

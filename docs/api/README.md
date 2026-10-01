@@ -7,7 +7,7 @@ Start with the two cross-cutting documents, then the per-area contract.
 |---|---|
 | [CONVENTIONS.md](CONVENTIONS.md) | Transport, session cookie, CSRF header, error shape, pagination |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Settings, middleware, dependencies, services/models layering, deployment shape |
-| [auth.md](auth.md) | Signup (OTP), login (email / Faculty ID / USN), logout, session |
+| [auth.md](auth.md) | Captcha, signup, login (email / Faculty ID / USN), logout, session |
 | [account.md](account.md) | Profile, change password, profile photo |
 | [academic.md](academic.md) | Public academic tree (Branch → Department → Year → Section) |
 | [academics.md](academics.md) | Admin: tree editor, faculty assignments, class directory |

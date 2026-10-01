@@ -228,36 +228,6 @@ def list_all_faculty():
     ).fetchall()
 
 
-# ---------- otp_sessions ----------
-
-def create_otp_session(email, otp_hash, expires_at):
-    db = get_db()
-    cur = db.execute(
-        "INSERT INTO otp_sessions (email, otp_hash, expires_at) VALUES (?, ?, ?)",
-        (email, otp_hash, expires_at),
-    )
-    db.commit()
-    return cur.lastrowid
-
-
-def get_latest_otp_session(email):
-    return get_db().execute(
-        "SELECT * FROM otp_sessions WHERE email = ? ORDER BY id DESC LIMIT 1", (email,)
-    ).fetchone()
-
-
-def increment_otp_attempt(otp_id):
-    db = get_db()
-    db.execute("UPDATE otp_sessions SET attempt_count = attempt_count + 1 WHERE id = ?", (otp_id,))
-    db.commit()
-
-
-def mark_otp_verified(otp_id):
-    db = get_db()
-    db.execute("UPDATE otp_sessions SET verified = 1 WHERE id = ?", (otp_id,))
-    db.commit()
-
-
 # ---------- supporting_relationships ----------
 
 def create_supporting_request(student_id, faculty_id, requested_by):

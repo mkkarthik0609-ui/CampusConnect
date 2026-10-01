@@ -26,7 +26,8 @@ from api.main import create_app  # noqa: E402
 from api.settings import Settings  # noqa: E402
 from models import queries  # noqa: E402
 from models import academic_queries as aq  # noqa: E402
-from services import auth_service, assignment_service, otp_service  # noqa: E402
+from api.settings import use_settings  # noqa: E402
+from services import auth_service, assignment_service, captcha_service  # noqa: E402
 
 PASSWORD = "Passw0rd!x"
 ADMIN_EMAIL = "admin@college.edu"
@@ -56,9 +57,7 @@ def _fast_password_hashing(monkeypatch):
     def cheap(password, method="pbkdf2:sha256:1000", salt_length=8):
         return real(password, method=method, salt_length=salt_length)
 
-    for mod in (auth_service, otp_service):
-        if hasattr(mod, "generate_password_hash"):
-            monkeypatch.setattr(mod, "generate_password_hash", cheap)
+    monkeypatch.setattr(auth_service, "generate_password_hash", cheap)
     monkeypatch.setattr(auth_service, "_DUMMY_HASH", None)
 
 
@@ -254,22 +253,31 @@ def db_count(app, table, where="1=1", params=()):
 # signup over HTTP
 # ---------------------------------------------------------------------------
 
+def solve_captcha(client, answer="TEST42", ip_header=None):
+    """GET a real captcha challenge, then store the HMAC of a known `answer` for it (the real answer is
+    only known to the server). Returns the {captcha_id, captcha_answer} fields to put in a request."""
+    resp = client.get("/api/auth/captcha")
+    assert resp.status_code == 200, resp.text
+    challenge_id = resp.json()["captcha_id"]
+    app = client.app
+    with use_settings(app.state.settings):
+        digest = captcha_service._hash_answer(challenge_id, captcha_service.normalize_answer(answer))
+    db_exec(app, "UPDATE captcha_challenges SET answer_hash = ? WHERE id = ?", (digest, challenge_id))
+    return {"captcha_id": challenge_id, "captcha_answer": answer}
+
+
 def http_student_signup(client, captured, email, usn, section_id, password=PASSWORD, extra=None,
                         full_name="New Student", phone="9876543210", confirm=None):
-    """Drive the real 3-step student signup (demo OTP mode). Returns the register response.
-    `captured` is unused (kept for old call sites); the OTP comes from `demo_otp`."""
-    resp = api_post(client, "/api/auth/signup/student/start", json={"college_email": email})
-    assert resp.status_code == 200, resp.text
-    otp = resp.json()["demo_otp"]
-    resp = api_post(client, "/api/auth/signup/student/verify", json={"college_email": email, "otp": otp})
-    assert resp.status_code == 200, resp.text
+    """Drive the real captcha-protected student signup. Returns the response.
+    `captured` is unused (kept for old call sites)."""
     data = {
         "college_email": email, "full_name": full_name, "usn": usn, "section_id": section_id,
         "phone": phone, "personal_email": f"p-{usn.lower()}@example.com",
         "password": password, "confirm_password": password if confirm is None else confirm,
     }
+    data.update(solve_captcha(client))
     data.update(extra or {})
-    return api_post(client, "/api/auth/signup/student/register", json=data)
+    return api_post(client, "/api/auth/signup/student", json=data)
 
 
 def http_faculty_signup(client, code, department="AIML", password=PASSWORD, extra=None, subjects="DSA, OS"):
@@ -278,6 +286,7 @@ def http_faculty_signup(client, code, department="AIML", password=PASSWORD, extr
         "professional_email": f"{code.lower()}@college.edu", "subjects": subjects,
         "password": password, "confirm_password": password,
     }
+    data.update(solve_captcha(client))
     data.update(extra or {})
     return api_post(client, "/api/auth/signup/faculty", json=data)
 

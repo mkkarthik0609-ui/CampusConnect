@@ -7,6 +7,7 @@ import { FormField } from "@/components/app/FormField";
 import { PasswordInput } from "@/components/app/PasswordInput";
 import { SubmitButton } from "@/components/app/SubmitButton";
 import { Notice } from "@/components/app/Notice";
+import { CaptchaField } from "@/components/app/CaptchaField";
 import { useAuth } from "@/auth/AuthProvider";
 import { ApiError } from "@/lib/api";
 import { usePageTitle } from "@/hooks/usePageTitle";
@@ -20,6 +21,9 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null); // { message, fields }
+  const [needsCaptcha, setNeedsCaptcha] = useState(false); // the server asks for one after repeated failures
+  const [captcha, setCaptcha] = useState({ id: "", answer: "" });
+  const [captchaKey, setCaptchaKey] = useState(0);
 
   const justRegistered = location.state?.registered;
   const needsSignIn = params.get("next");
@@ -31,13 +35,23 @@ export default function Login() {
       setError({ message: "", fields: { ...(!identifier.trim() && { identifier: "Enter your email, USN or Faculty ID." }), ...(!password && { password: "Enter your password." }) } });
       return;
     }
+    if (needsCaptcha && !captcha.answer.trim()) {
+      setError({ message: "", fields: { captcha: "Type the characters shown in the image." } });
+      return;
+    }
     setBusy(true);
     try {
-      const user = await login({ identifier: identifier.trim(), password });
+      const user = await login({
+        identifier: identifier.trim(), password,
+        ...(needsCaptcha ? { captcha_id: captcha.id, captcha_answer: captcha.answer } : {}),
+      });
       toast.success(`Welcome back${user?.full_name ? `, ${user.full_name.split(" ")[0]}` : ""}.`);
       // GuestOnly sees the new session and redirects to ?next= or the role's home.
     } catch (err) {
-      setError({ message: err.message, fields: err instanceof ApiError ? err.fields : {}, rateLimited: err.isRateLimited });
+      const fields = err instanceof ApiError ? err.fields : {};
+      if (err instanceof ApiError && (err.code === "captcha_required" || fields.captcha)) setNeedsCaptcha(true);
+      if (needsCaptcha || fields.captcha) setCaptchaKey((k) => k + 1); // challenges are single use
+      setError({ message: err.message, fields, rateLimited: err.isRateLimited });
       setBusy(false);
     }
   }
@@ -73,6 +87,9 @@ export default function Login() {
         <FormField label="Password" error={error?.fields?.password}>
           <PasswordInput autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </FormField>
+        {needsCaptcha ? (
+          <CaptchaField label="Security check" resetKey={captchaKey} onChange={setCaptcha} error={error?.fields?.captcha} />
+        ) : null}
         <SubmitButton className="mt-1 w-full" loading={busy} loadingText="Signing in">Sign in</SubmitButton>
       </form>
     </AuthCard>

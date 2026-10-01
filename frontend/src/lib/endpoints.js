@@ -16,12 +16,18 @@ export const authApi = {
   /** GET /api/auth/session -> { authenticated, user, csrf_token, unread_notifications, unread_messages } (always 200) */
   session: () => fetchSession(),
 
+  /** GET /api/auth/captcha -> { captcha_id, image (PNG data URL), expires_in_seconds }. Single use. */
+  captcha: () => api.get("/api/auth/captcha", { skipAuthRedirect: true }),
+
   /**
-   * POST /api/auth/login { identifier, password } -> { ok, message, user, csrf_token }
+   * POST /api/auth/login { identifier, password, captcha_id?, captcha_answer? } -> { ok, message, user, csrf_token }
    * `identifier` = email, Faculty ID or USN. 401 `invalid_credentials`, 429 `rate_limited` (lockout).
+   * After repeated failures the server answers 400 `captcha_required` (fields.captcha); resend with the captcha.
    */
-  async login({ identifier, password }) {
-    const data = await api.post("/api/auth/login", { identifier, password }, { skipAuthRedirect: true });
+  async login({ identifier, password, captcha_id, captcha_answer }) {
+    const body = { identifier, password };
+    if (captcha_id) { body.captcha_id = captcha_id; body.captcha_answer = captcha_answer || ""; }
+    const data = await api.post("/api/auth/login", body, { skipAuthRedirect: true });
     setCsrfToken(data?.csrf_token);
     return data;
   },
@@ -33,18 +39,14 @@ export const authApi = {
     return data;
   },
 
-  // ---- student signup (3 steps) ----
-  /** Step 1: POST /api/auth/signup/student/start { college_email } -> { ok, message, email, delivery: "email"|"demo", expires_in_minutes, demo_otp? } */
-  studentStart: (college_email) => api.post("/api/auth/signup/student/start", { college_email }, { skipAuthRedirect: true }),
-  /** Step 2: POST /api/auth/signup/student/verify { college_email, otp } -> { ok, email }   (error field: otp) */
-  studentVerify: (college_email, otp) => api.post("/api/auth/signup/student/verify", { college_email, otp }, { skipAuthRedirect: true }),
   /**
-   * Step 3: POST /api/auth/signup/student/register (201)
-   * { college_email, full_name, usn, section_id, phone, personal_email, password, confirm_password }
+   * POST /api/auth/signup/student (201)
+   * { college_email, full_name, usn, section_id, phone, personal_email, password, confirm_password, captcha_id, captcha_answer }
+   * Errors: 400 with fields (a wrong/expired captcha is fields.captcha; the captcha is consumed either way).
    */
-  studentRegister: (body) => api.post("/api/auth/signup/student/register", body, { skipAuthRedirect: true }),
+  studentSignup: (body) => api.post("/api/auth/signup/student", body, { skipAuthRedirect: true }),
 
-  /** POST /api/auth/signup/faculty (201) { full_name, faculty_code, department, professional_email, subjects: string[], password, confirm_password } */
+  /** POST /api/auth/signup/faculty (201) { full_name, faculty_code, department, professional_email, subjects: string[], password, confirm_password, captcha_id, captcha_answer } */
   facultySignup: (body) => api.post("/api/auth/signup/faculty", body, { skipAuthRedirect: true }),
   /** GET /api/auth/faculty-departments -> { items: string[] } active department names for the faculty signup select */
   facultyDepartments: () => api.get("/api/auth/faculty-departments", { skipAuthRedirect: true }),
@@ -60,7 +62,7 @@ export const accountApi = {
 
 // ---- app metadata -------------------------------------------------------------------------
 export const metaApi = {
-  /** GET /api/meta -> { app, demo_otp_enabled } */
+  /** GET /api/meta -> { app } */
   get: () => api.get("/api/meta", { skipAuthRedirect: true }),
 };
 

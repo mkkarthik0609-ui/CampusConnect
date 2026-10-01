@@ -14,8 +14,8 @@ from api.main import ROUTER_MODULES, create_app
 from api.settings import Settings, get_settings, use_settings
 from models import academic_queries as aq
 from models import queries
-from services import (academic_service, assignment_service, auth_service, chat_service, file_service,
-                      meeting_service, otp_service, permission_service, supporting_service)
+from services import (academic_service, assignment_service, auth_service, captcha_service, chat_service,
+                      file_service, meeting_service, permission_service, supporting_service)
 from services.errors import ServiceError
 from tests.conftest import (
     PASSWORD, api_login, api_post, db_count, db_exec, db_one, find_section, login_client, make_admin,
@@ -32,10 +32,10 @@ def err(resp):
 # ---------------------------------------------------------------------------
 
 def test_settings_defaults_are_environment_independent(monkeypatch):
-    monkeypatch.setenv("SHOW_DEMO_OTP", "0")
+    monkeypatch.setenv("CAPTCHA_MAX_PER_IP_PER_HOUR", "1")
     monkeypatch.setenv("DATABASE_PATH", "/elsewhere.db")
     s = Settings()
-    assert s.show_demo_otp is True and s.database_path != "/elsewhere.db"
+    assert s.captcha_max_per_ip_per_hour == 60 and s.database_path != "/elsewhere.db"
     assert s.csrf_enabled and s.session_cookie_name == "cc_session"
     assert s.max_request_bytes == 10 * 1024 * 1024
     assert s.session_idle_timeout_minutes == 60 and s.session_lifetime_seconds == 12 * 3600
@@ -45,17 +45,17 @@ def test_settings_from_env(monkeypatch, tmp_path):
     for k, v in {
         "APP_ENV": "production", "SECRET_KEY": "k" * 32, "DATABASE_PATH": str(tmp_path / "x.db"),
         "UPLOAD_ROOT": str(tmp_path / "up"), "TRUST_PROXY": "1", "TRUST_PROXY_HOPS": "2",
-        "SHOW_DEMO_OTP": "0", "SMTP_HOST": " smtp.example ", "ENABLE_SCHEDULER": "0", "BOOTSTRAP_ADMIN": "yes",
-        "LOGIN_MAX_FAILURES_PER_IDENTIFIER": "7", "OTP_MAX_PER_EMAIL_PER_HOUR": "oops", "DEBUG": "1",
+        "CAPTCHA_MAX_PER_IP_PER_HOUR": "9", "ENABLE_SCHEDULER": "0", "BOOTSTRAP_ADMIN": "yes",
+        "LOGIN_MAX_FAILURES_PER_IDENTIFIER": "7", "LOGIN_CAPTCHA_AFTER_FAILURES": "oops", "DEBUG": "1",
     }.items():
         monkeypatch.setenv(k, v)
     s = Settings.from_env()
     assert s.is_production and s.cookie_secure and s.secret_key == "k" * 32
     assert s.trust_proxy and s.trust_proxy_hops == 2
-    assert not s.show_demo_otp and s.smtp_host == "smtp.example"
+    assert s.captcha_max_per_ip_per_hour == 9
     assert not s.enable_scheduler and s.bootstrap_admin
     assert s.login_max_failures_per_identifier == 7
-    assert s.otp_max_per_email_per_hour == 5  # unparsable -> default
+    assert s.login_captcha_after_failures == 3  # unparsable -> default
     assert not s.debug and not s.docs_enabled  # never debug in production
     assert s.chat_upload_dir == str(tmp_path / "up" / "chat")
     assert s.profile_student_dir.endswith("students") and s.profile_faculty_dir.endswith("faculty")
@@ -73,16 +73,15 @@ def test_render_env_defaults_to_production(monkeypatch):
 
 
 def test_get_settings_follows_the_request_and_session_context(tmp_path):
-    a = create_app(make_settings(tmp_path / "a", otp_length=4))
-    b = create_app(make_settings(tmp_path / "b", otp_length=8))
+    a = create_app(make_settings(tmp_path / "a", captcha_length=4))
+    b = create_app(make_settings(tmp_path / "b", captcha_length=8))
     assert TestClient(a).get("/api/meta").status_code == 200
     # two apps alive at once keep their own settings/database per request
     ca, cb = TestClient(a), TestClient(b)
-    assert len(api_post(ca, "/api/auth/signup/student/start", json={"college_email": "x@x.edu"}).json()["demo_otp"]) == 4
-    assert len(api_post(cb, "/api/auth/signup/student/start", json={"college_email": "x@x.edu"}).json()["demo_otp"]) == 8
-    assert db_count(a, "otp_sessions") == 1 and db_count(b, "otp_sessions") == 1
+    assert ca.get("/api/auth/captcha").status_code == 200 and cb.get("/api/auth/captcha").status_code == 200
+    assert db_count(a, "captcha_challenges") == 1 and db_count(b, "captcha_challenges") == 1
     with use_settings(a.state.settings):
-        assert get_settings().otp_length == 4
+        assert get_settings().captcha_length == 4
 
 
 def test_testing_settings_get_a_random_secret_when_none_given(tmp_path):
@@ -200,8 +199,8 @@ def test_models_database_is_a_thin_shim():
     (auth_service.ValidationError("bad"), 400, "validation_error"),
     (auth_service.ConflictError("dup"), 409, "conflict"),
     (auth_service.LockoutError("slow down"), 429, "rate_limited"),
-    (otp_service.OtpRateLimitError("slow"), 429, "rate_limited"),
-    (otp_service.DeliveryError("smtp"), 503, "delivery_unavailable"),
+    (captcha_service.CaptchaRateLimitError("slow"), 429, "rate_limited"),
+    (captcha_service.CaptchaError("wrong"), 400, "validation_error"),
     (chat_service.ChatAccessError("You do not have access to this conversation."), 403, "forbidden"),
     (chat_service.ChatAccessError("Conversation not found."), 404, "not_found"),
     (chat_service.ChatEditError("Message cannot be empty."), 400, "validation_error"),
@@ -311,8 +310,7 @@ def test_registered_routes(app):
     paths = {(m.upper(), path) for path, ops in app.openapi()["paths"].items() for m in ops}
     for method, path in [
         ("GET", "/api/auth/session"), ("POST", "/api/auth/login"), ("POST", "/api/auth/logout"),
-        ("POST", "/api/auth/signup/student/start"), ("POST", "/api/auth/signup/student/verify"),
-        ("POST", "/api/auth/signup/student/register"), ("POST", "/api/auth/signup/faculty"),
+        ("GET", "/api/auth/captcha"), ("POST", "/api/auth/signup/student"), ("POST", "/api/auth/signup/faculty"),
         ("GET", "/api/auth/faculty-departments"), ("POST", "/api/account/password"),
         ("POST", "/api/account/theme"), ("GET", "/api/academic/tree"), ("GET", "/api/notifications"),
         ("POST", "/api/notifications/read-all"), ("POST", "/api/notifications/{notification_id}/read"),
@@ -399,7 +397,7 @@ def test_academic_tree_ids_match_signup_section_ids(app, client):
 
 
 def test_meta_endpoint(client):
-    assert client.get("/api/meta").json() == {"app": "Campus Connect", "demo_otp_enabled": True}
+    assert client.get("/api/meta").json() == {"app": "Campus Connect"}
 
 
 def test_notifications_api(app, client):

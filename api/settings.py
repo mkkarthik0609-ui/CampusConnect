@@ -81,22 +81,12 @@ class Settings:
     allowed_chat_extensions: frozenset = frozenset({"pdf", "png", "jpg", "jpeg", "docx"})
     allowed_image_extensions: frozenset = frozenset({"png", "jpg", "jpeg"})
 
-    # ---- OTP (student signup) ----
-    otp_length: int = 6
-    otp_expiry_minutes: int = 10
-    otp_max_attempts: int = 5
-    otp_max_per_email_per_hour: int = 5
-    otp_max_per_ip_per_hour: int = 20
-    otp_verified_max_age_minutes: int = 30
-    show_demo_otp: bool = True
-    resend_api_key: str = ""
-    resend_from: str = ""
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_user: str = ""
-    smtp_password: str = ""
-    smtp_from: str = ""
-    smtp_tls: str = "1"  # "1"/"starttls", "ssl" or "0"
+    # ---- captcha (signup; login after repeated failures) ----
+    captcha_length: int = 6
+    captcha_expiry_minutes: int = 5
+    captcha_max_per_ip_per_hour: int = 60
+    login_captcha_after_failures: int = 3        # per identifier within login_window_minutes
+    login_captcha_after_ip_failures: int = 10    # per IP (higher: campus NAT shares one address)
 
     # ---- login throttling ----
     login_window_minutes: int = 15
@@ -164,17 +154,8 @@ class Settings:
             database_path=os.environ.get("DATABASE_PATH") or cls.database_path,
             upload_root=os.environ.get("UPLOAD_ROOT") or cls.upload_root,
             frontend_dist=os.environ.get("FRONTEND_DIST") or cls.frontend_dist,
-            otp_max_per_email_per_hour=_env_int("OTP_MAX_PER_EMAIL_PER_HOUR", cls.otp_max_per_email_per_hour),
-            otp_max_per_ip_per_hour=_env_int("OTP_MAX_PER_IP_PER_HOUR", cls.otp_max_per_ip_per_hour),
-            show_demo_otp=_env_bool("SHOW_DEMO_OTP", True),
-            resend_api_key=os.environ.get("RESEND_API_KEY", "").strip(),
-            resend_from=os.environ.get("RESEND_FROM", "").strip() or os.environ.get("SMTP_FROM", "").strip(),
-            smtp_host=os.environ.get("SMTP_HOST", "").strip(),
-            smtp_port=_env_int("SMTP_PORT", 587),
-            smtp_user=os.environ.get("SMTP_USER", ""),
-            smtp_password=os.environ.get("SMTP_PASSWORD", ""),
-            smtp_from=os.environ.get("SMTP_FROM", "") or os.environ.get("SMTP_USER", ""),
-            smtp_tls=os.environ.get("SMTP_TLS", "1").strip().lower(),
+            captcha_max_per_ip_per_hour=_env_int("CAPTCHA_MAX_PER_IP_PER_HOUR", cls.captcha_max_per_ip_per_hour),
+            login_captcha_after_failures=_env_int("LOGIN_CAPTCHA_AFTER_FAILURES", cls.login_captcha_after_failures),
             login_max_failures_per_identifier=_env_int(
                 "LOGIN_MAX_FAILURES_PER_IDENTIFIER", cls.login_max_failures_per_identifier),
             login_max_failures_per_ip=_env_int("LOGIN_MAX_FAILURES_PER_IP", cls.login_max_failures_per_ip),

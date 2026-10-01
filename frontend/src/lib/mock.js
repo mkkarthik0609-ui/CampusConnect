@@ -33,8 +33,6 @@ let notifications = [
 let current = (() => { try { return JSON.parse(sessionStorage.getItem("cc-mock-user")); } catch { return null; } })();
 const save = () => { try { sessionStorage.setItem("cc-mock-user", JSON.stringify(current)); } catch { /* ignore */ } };
 let csrf = "mock-csrf-1";
-let verifiedEmail = null;
-let otp = "482913";
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -63,7 +61,7 @@ export function installMock() {
     if (method !== "GET" && init.headers?.["X-CSRFToken"] !== csrf) return err(400, "csrf_failed", "CSRF token missing or invalid.");
 
     if (path === "/api/auth/session") return json(200, session());
-    if (path === "/api/meta") return json(200, { app: "Campus Connect", demo_otp_enabled: true });
+    if (path === "/api/meta") return json(200, { app: "Campus Connect" });
     if (path === "/api/academic/tree") return json(200, TREE);
     if (path === "/api/auth/faculty-departments") return json(200, { items: ["AIML", "Cyber Security", "VLSI"] });
 
@@ -83,23 +81,22 @@ export function installMock() {
       return json(200, { ok: true, message: "You have been signed out.", csrf_token: csrf });
     }
 
-    if (path === "/api/auth/signup/student/start") {
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.college_email || "")) return err(400, "validation_error", "College email is not a valid email address.", { college_email: "College email is not a valid email address." });
-      verifiedEmail = null;
-      return json(200, { ok: true, message: "Demo mode: your verification code is shown on screen.", email: body.college_email.toLowerCase(), delivery: "demo", expires_in_minutes: 10, demo_otp: otp });
+    if (path === "/api/auth/captcha") {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="84"><rect width="240" height="84" fill="#eef"/><text x="30" y="58" font-size="46" font-family="monospace" fill="#223">MOCK42</text></svg>`;
+      return json(200, { captcha_id: "mock-captcha", image: "data:image/svg+xml;base64," + btoa(svg), expires_in_seconds: 300 });
     }
-    if (path === "/api/auth/signup/student/verify") {
-      if (body.otp !== otp) return err(400, "validation_error", "That code is not correct.", { otp: "That code is not correct." });
-      verifiedEmail = body.college_email;
-      return json(200, { ok: true, message: "Email verified. Please complete your registration.", email: body.college_email });
-    }
-    if (path === "/api/auth/signup/student/register") {
-      if (verifiedEmail !== body.college_email) return err(403, "otp_not_verified", "Please verify your college email with the OTP first.");
+    const captchaFails = () => String(body.captcha_answer || "").toUpperCase() !== "MOCK42"
+      && err(400, "validation_error", "Incorrect captcha. A new one has been loaded. (mock answer: MOCK42)", { captcha: "Incorrect captcha. A new one has been loaded. (mock answer: MOCK42)" });
+    if (path === "/api/auth/signup/student") {
+      const bad = captchaFails(); if (bad) return bad;
       if (!/^[A-Za-z0-9]{6,15}$/.test(body.usn || "")) return err(400, "validation_error", "USN must be 6-15 alphanumeric characters.", { usn: "USN must be 6-15 alphanumeric characters." });
       if (!/[A-Z]/.test(body.password) || !/[a-z]/.test(body.password) || !/\d/.test(body.password) || body.password.length < 8) return err(400, "validation_error", "Password rules.", { password: "Password must be at least 8 characters and include an uppercase letter, a lowercase letter and a digit." });
       return json(201, { ok: true, message: "Registration successful. Please sign in." });
     }
-    if (path === "/api/auth/signup/faculty") return json(201, { ok: true, message: "Registration successful. Please sign in." });
+    if (path === "/api/auth/signup/faculty") {
+      const bad = captchaFails(); if (bad) return bad;
+      return json(201, { ok: true, message: "Registration successful. Please sign in." });
+    }
 
     if (!current) return err(401, "unauthenticated", "Please sign in to continue.");
 

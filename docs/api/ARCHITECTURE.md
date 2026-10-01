@@ -45,9 +45,7 @@ an explicit `Settings(...)`.
 | `UPLOAD_ROOT` | `upload_root` | `uploads/` (derived: `profile_student_dir`, `profile_faculty_dir`, `chat_upload_dir`) |
 | `FRONTEND_DIST` | `frontend_dist` | `frontend/dist` |
 | `TRUST_PROXY`, `TRUST_PROXY_HOPS` | `trust_proxy`, `trust_proxy_hops` | client IP = `hops`-th from the right of `X-Forwarded-For` (Vercel + Render = 2) |
-| `SHOW_DEMO_OTP` | `show_demo_otp` | `1`; OTP is returned in the response only if there is no SMTP and this is on |
-| `SMTP_HOST/PORT/USER/PASSWORD/FROM/TLS` | `smtp_*` | optional real OTP e-mail |
-| `OTP_MAX_PER_EMAIL_PER_HOUR`, `OTP_MAX_PER_IP_PER_HOUR` | `otp_max_per_*` | 5 / 20 |
+| `CAPTCHA_MAX_PER_IP_PER_HOUR`, `LOGIN_CAPTCHA_AFTER_FAILURES` | `captcha_max_per_ip_per_hour`, `login_captcha_after_failures` | 60 / 3 |
 | `LOGIN_MAX_FAILURES_PER_IDENTIFIER`, `LOGIN_MAX_FAILURES_PER_IP` | `login_max_failures_*` | 5 / 20 per 15 min |
 | `SESSION_IDLE_TIMEOUT_MINUTES` | `session_idle_timeout_minutes` | 60 (absolute lifetime 12 h = `session_lifetime_seconds`) |
 | `ENABLE_SCHEDULER` | `enable_scheduler` | `1`; reminder job interval `REMINDER_INTERVAL_MINUTES` (60) |
@@ -55,7 +53,7 @@ an explicit `Settings(...)`.
 | - | `csrf_enabled` | `True`; only tests set `False` |
 | - | `testing` | `True` in tests: no scheduler, no admin bootstrap, random secret if none |
 
-Services read configuration with `from api.settings import get_settings; get_settings().otp_length`.
+Services read configuration with `from api.settings import get_settings; get_settings().captcha_length`.
 
 ## Request lifecycle
 
@@ -69,7 +67,7 @@ Services read configuration with `from api.settings import get_settings; get_set
    `get_db()`. Queries commit themselves (`db.commit()`); there is no implicit transaction per request.
 4. `SessionMiddleware` (Starlette): HttpOnly, SameSite=Lax (Secure in production) signed cookie `cc_session`
    -> `request.session` (a dict). Forged/unsigned cookies give an empty session. Keys: `user_id, role, full_name,
-   student_id, faculty_id, theme, login_at, last_seen, csrf_token, otp_verified_email, otp_verified_at`.
+   student_id, faculty_id, theme, login_at, last_seen, csrf_token`.
 5. App-level dependency `csrf_protect` (runs for every route): POST/PUT/PATCH/DELETE must carry header
    `X-CSRFToken` equal (constant-time) to `session["csrf_token"]`, else 400 `csrf_failed`. Safe methods are exempt.
 6. Route dependencies: `get_current_user` validates the session (absolute + idle timeouts, user exists and
@@ -123,7 +121,7 @@ Rules:
   `{"student": {...}}`. Use `api.schemas` helpers for the shared user / class / faculty shapes.
 * **Errors**: `raise ApiError(404, "not_found", "No such meeting.")` (optionally `fields={...}`), or let service
   exceptions bubble out of `with service_errors():`. Mapping (also installed as global handlers):
-  `ServiceError` -> its `http_status/code`; `LockoutError`/`OtpRateLimitError` -> 429 `rate_limited`;
+  `ServiceError` -> its `http_status/code`; `LockoutError`/`CaptchaRateLimitError` -> 429 `rate_limited`;
   `ConflictError` -> 409; other `ValidationError` -> 400 (+`fields` when it has `.field`); `DeliveryError` -> 503;
   `ChatAccessError` -> 403; `MeetingError`, `SupportingError`, `PermissionError_`, `AssignmentError`,
   `AcademicError`, `ChatEditError` -> 400 unless the message says *not found* (404), *not authorized / do not have

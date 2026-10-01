@@ -199,6 +199,18 @@ def _is_locked_out(identifier, ip):
     return False
 
 
+def login_requires_captcha(identifier, ip=None):
+    """True once this identifier (or, with a higher bar, this IP) has accumulated recent failed logins.
+    Keyed on failure counts only (recorded for unknown identifiers too), so it never reveals whether an
+    account exists."""
+    cfg = get_settings()
+    ident = normalize_identifier(identifier)
+    window = cfg.login_window_minutes
+    if sq.count_recent_failures_for_identifier(ident, window) >= cfg.login_captcha_after_failures:
+        return True
+    return bool(ip and sq.count_recent_failures_for_ip(ip, window) >= cfg.login_captcha_after_ip_failures)
+
+
 def authenticate(identifier, password, ip=None):
     """Verify credentials for an email / Faculty ID / USN. Raises ValidationError with one identical
     message for unknown user, wrong password and inactive account; raises LockoutError when throttled.

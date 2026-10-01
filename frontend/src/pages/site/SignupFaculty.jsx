@@ -8,6 +8,7 @@ import { FormField } from "@/components/app/FormField";
 import { PasswordInput } from "@/components/app/PasswordInput";
 import { SubmitButton } from "@/components/app/SubmitButton";
 import { Notice } from "@/components/app/Notice";
+import { CaptchaField } from "@/components/app/CaptchaField";
 import { authApi } from "@/lib/endpoints";
 import { ApiError, errorMessage } from "@/lib/api";
 import { useFacultyDepartments } from "@/hooks/useFacultyDepartments";
@@ -24,6 +25,8 @@ export default function SignupFaculty() {
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [captcha, setCaptcha] = useState({ id: "", answer: "" });
+  const [captchaKey, setCaptchaKey] = useState(0);
 
   const set = (key) => (e) => { setForm((f) => ({ ...f, [key]: e.target.value })); if (errors[key]) setErrors((x) => ({ ...x, [key]: "" })); };
 
@@ -37,6 +40,7 @@ export default function SignupFaculty() {
     if (!form.department) next.department = "Choose your department.";
     if (!subjects.length) next.subjects = "List at least one subject, separated by commas.";
     if (form.password && form.password !== form.confirm_password) next.confirm_password = "Passwords do not match.";
+    if (!captcha.answer.trim()) next.captcha = "Type the characters shown in the image.";
     if (Object.keys(next).length) { setErrors(next); setFormError("Check the highlighted fields."); return; }
 
     setBusy(true);
@@ -50,6 +54,8 @@ export default function SignupFaculty() {
         subjects,
         password: form.password,
         confirm_password: form.confirm_password,
+        captcha_id: captcha.id,
+        captcha_answer: captcha.answer,
       });
       toast.success("Registration successful. Please sign in.");
       navigate("/login", { replace: true, state: { registered: true } });
@@ -57,6 +63,7 @@ export default function SignupFaculty() {
       const fields = err instanceof ApiError ? err.fields : {};
       setErrors(fields);
       setFormError(Object.keys(fields).length ? "Check the highlighted fields." : errorMessage(err));
+      setCaptchaKey((k) => k + 1); // the server consumed this challenge
     } finally {
       setBusy(false);
     }
@@ -111,6 +118,10 @@ export default function SignupFaculty() {
               <PasswordInput autoComplete="new-password" minLength={8} value={form.confirm_password} onChange={set("confirm_password")} />
             </FormField>
           </div>
+        </section>
+
+        <section className="border-t pt-5">
+          <CaptchaField resetKey={captchaKey} onChange={setCaptcha} error={errors.captcha} />
         </section>
 
         <SubmitButton className="w-full" loading={busy} loadingText="Creating account">Create account</SubmitButton>

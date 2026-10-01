@@ -83,14 +83,14 @@ def _classify(message: str, default_status: int = 400):
 
 def _service_classes():
     """(class, kind) pairs, most specific first. Imported lazily: services import api.db/api.settings."""
-    from services import (academic_service, assignment_service, auth_service, chat_service, file_service,
-                          meeting_service, otp_service, permission_service, supporting_service)
+    from services import (academic_service, assignment_service, auth_service, captcha_service, chat_service,
+                          file_service,
+                          meeting_service, permission_service, supporting_service)
     from services.errors import ServiceError
     return [
         (ServiceError, "service"),
         (auth_service.LockoutError, "rate"),
-        (otp_service.OtpRateLimitError, "rate"),
-        (otp_service.DeliveryError, "delivery"),
+        (captcha_service.CaptchaRateLimitError, "rate"),
         (auth_service.ConflictError, "conflict"),
         (auth_service.ValidationError, "validation"),
         (chat_service.ChatAccessError, "access"),
@@ -114,8 +114,6 @@ def map_service_error(exc: BaseException) -> Optional[ApiError]:
             return ApiError(getattr(exc, "http_status", 400), getattr(exc, "code", "bad_request"), message)
         if kind == "rate":
             return ApiError(429, "rate_limited", message)
-        if kind == "delivery":
-            return ApiError(503, "delivery_unavailable", message)
         if kind == "conflict":
             field = getattr(exc, "field", None)
             return ApiError(409, "conflict", message, {field: message} if field else None)

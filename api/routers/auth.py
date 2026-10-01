@@ -1,16 +1,16 @@
-"""/api/auth/* - session, login/logout and self-service signup (student with OTP, faculty)."""
+"""/api/auth/* - session, captcha, login/logout and self-service signup (student, faculty)."""
 from typing import List, Optional, Union
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from pydantic import Field, StrictInt, field_validator
 
 from api.deps import (ApiModel, CurrentUser, Stripped, client_ip, current_user_optional, ok, service_errors)
 from api.errors import ApiError
 from api.schemas import user_payload
-from api.settings import get_settings
 from models import academic_queries as aq
 from models import queries
-from services import auth_service, notification_service as notif, otp_service, session_service
+from services import auth_service, captcha_service, notification_service as notif, session_service
 from services.auth_service import ValidationError
 
 router = APIRouter(prefix="/api/auth")
@@ -18,21 +18,17 @@ router = APIRouter(prefix="/api/auth")
 
 # ---------------------------------------------------------------- request models
 
-class LoginIn(ApiModel):
+class CaptchaIn(ApiModel):
+    captcha_id: Stripped = Field(default="", max_length=128)
+    captcha_answer: Stripped = Field(default="", max_length=32)
+
+
+class LoginIn(CaptchaIn):
     identifier: Stripped = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=1024)
 
 
-class StudentStartIn(ApiModel):
-    college_email: Stripped = Field(min_length=1, max_length=254)
-
-
-class StudentVerifyIn(ApiModel):
-    college_email: Stripped = Field(min_length=1, max_length=254)
-    otp: Stripped = Field(min_length=1, max_length=16)
-
-
-class StudentRegisterIn(ApiModel):
+class StudentSignupIn(CaptchaIn):
     college_email: Stripped = Field(min_length=1, max_length=254)
     full_name: Stripped = Field(min_length=1, max_length=120)
     usn: Stripped = Field(min_length=1, max_length=32)
@@ -43,7 +39,7 @@ class StudentRegisterIn(ApiModel):
     confirm_password: str = Field(max_length=1024)
 
 
-class FacultySignupIn(ApiModel):
+class FacultySignupIn(CaptchaIn):
     full_name: Stripped = Field(min_length=1, max_length=120)
     faculty_code: Stripped = Field(min_length=1, max_length=32)
     department: Stripped = Field(min_length=1, max_length=80)
@@ -90,11 +86,26 @@ def get_session(request: Request, user: Optional[CurrentUser] = Depends(current_
     }
 
 
+@router.get("/captcha")
+def get_captcha(request: Request):
+    """A fresh image captcha: {captcha_id, image (PNG data URL), expires_in_seconds}. Single use."""
+    with service_errors():
+        challenge = captcha_service.issue_challenge(ip=client_ip(request))
+    return JSONResponse(challenge, headers={"Cache-Control": "no-store"})
+
+
 @router.post("/login")
 def login(body: LoginIn, request: Request):
+    ip = client_ip(request)
+    if auth_service.login_requires_captcha(body.identifier, ip):  # adaptive: only after repeated failures
+        if not body.captcha_id:
+            raise ApiError(400, "captcha_required", "Please solve the captcha to continue.",
+                           {"captcha": "Type the characters shown in the image."})
+        with service_errors():
+            captcha_service.verify(body.captcha_id, body.captcha_answer)
     with service_errors():
         try:
-            row = auth_service.authenticate(body.identifier, body.password, ip=client_ip(request))
+            row = auth_service.authenticate(body.identifier, body.password, ip=ip)
         except auth_service.LockoutError:
             raise
         except ValidationError as exc:  # the one generic message for every credential failure
@@ -109,65 +120,26 @@ def logout(request: Request):
     return ok("You have been signed out.", csrf_token=token)
 
 
-# ---------------------------------------------------------------- student signup (3 steps)
+# ---------------------------------------------------------------- signup (captcha-protected)
 
-@router.post("/signup/student/start")
-def signup_student_start(body: StudentStartIn, request: Request):
+@router.post("/signup/student", status_code=201)
+def signup_student(body: StudentSignupIn, request: Request):
     with service_errors():
-        email = auth_service.validate_email(body.college_email.lower(), "College email", "college_email")
-        if queries.get_user_by_email(email):
-            raise auth_service.ConflictError("An account with this college email already exists.", "college_email")
-        mode = otp_service.delivery_mode()
-        if mode == "none":
-            raise otp_service.DeliveryError(
-                "Email verification is not available right now. Please contact the administrator."
-            )
-        otp = otp_service.generate_and_store_otp(email, ip=client_ip(request))
-        emailed = otp_service.deliver_otp(email, otp)
-    expiry = get_settings().otp_expiry_minutes
-    if emailed:
-        return ok(f"We sent a 6-digit verification code to {email}. It expires in {expiry} minutes.",
-                  email=email, delivery="email", expires_in_minutes=expiry)
-    # Demo mode only (no SMTP and SHOW_DEMO_OTP): the code is returned for on-screen display.
-    return ok(f"Demo mode: your verification code is shown on screen for {email}.",
-              email=email, delivery="demo", expires_in_minutes=expiry, demo_otp=otp)
-
-
-@router.post("/signup/student/verify")
-def signup_student_verify(body: StudentVerifyIn, request: Request):
-    email = otp_service.normalize_email(body.college_email)
-    with service_errors():
-        verified, error = otp_service.verify_otp(email, body.otp)
-        if not verified:
-            raise ValidationError(error, "otp")
-    otp_service.remember_verified_in_session(request.session, email)
-    return ok("Email verified. Please complete your registration.", email=email)
-
-
-@router.post("/signup/student/register", status_code=201)
-def signup_student_register(body: StudentRegisterIn, request: Request):
-    email = otp_service.normalize_email(body.college_email)
-    # The OTP must have been verified recently AND by this browser session.
-    if not (otp_service.is_email_otp_verified(email)
-            and otp_service.is_verified_in_session(request.session, email)):
-        raise ApiError(403, "otp_not_verified", "Please verify your college email with the OTP first.",
-                       {"college_email": "Verify this email with the OTP first."})
-    with service_errors():
+        # The captcha is checked (and consumed) first, so account probing is impossible without solving one.
+        captcha_service.verify(body.captcha_id, body.captcha_answer)
         _require_same_passwords(body.password, body.confirm_password)
         auth_service.register_student({
             "full_name": body.full_name, "usn": body.usn, "section_id": body.section_id,
             "phone": body.phone, "personal_email": body.personal_email,
-            "college_email": email, "password": body.password,
+            "college_email": body.college_email.lower(), "password": body.password,
         })
-    otp_service.clear_verified_in_session(request.session)
     return ok("Registration successful. Please sign in.")
 
-
-# ---------------------------------------------------------------- faculty signup
 
 @router.post("/signup/faculty", status_code=201)
 def signup_faculty(body: FacultySignupIn):
     with service_errors():
+        captcha_service.verify(body.captcha_id, body.captcha_answer)
         _require_same_passwords(body.password, body.confirm_password)
         auth_service.register_faculty({
             "full_name": body.full_name, "faculty_code": body.faculty_code, "department": body.department,

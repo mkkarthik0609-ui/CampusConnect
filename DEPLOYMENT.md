@@ -107,12 +107,9 @@ Every variable the backend reads is documented in `.env.example`. The ones that 
 | `TRUST_PROXY_HOPS` | `2` | Proxies appending to `X-Forwarded-For`: Vercel + Render's load balancer. Use `1` if a custom domain points straight at Render and Vercel is not in the path. |
 | `BOOTSTRAP_ADMIN` | `1` | Creates the first admin at start-up from the three variables below (idempotent). |
 | `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | *(typed in the dashboard)* | Never commit these. |
-| `SHOW_DEMO_OTP` | `1` | Student signup OTP is returned to the browser and shown on screen (demo mode, used only when no SMTP is configured). Set `0` once SMTP works. |
 | `REMINDER_INTERVAL_MINUTES` | `60` | Meeting-reminder job interval. |
-| `RESEND_API_KEY`, `RESEND_FROM` | *(optional)* | OTP e-mail through Resend's HTTPS API (works on Render free, where SMTP is blocked). Takes priority over SMTP. `RESEND_FROM` e.g. `Campus Connect <no-reply@yourdomain.com>` (verified domain). |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TLS` | *(optional)* | Real OTP e-mail. Add in the dashboard only when you have a provider. |
 | `ENABLE_SCHEDULER` | `1` (default) | `0` turns the reminder job off. |
-| `LOGIN_MAX_FAILURES_PER_IDENTIFIER`, `LOGIN_MAX_FAILURES_PER_IP`, `SESSION_IDLE_TIMEOUT_MINUTES`, `OTP_MAX_PER_EMAIL_PER_HOUR`, `OTP_MAX_PER_IP_PER_HOUR` | defaults 5 / 20 / 60 / 5 / 20 | Optional tuning. |
+| `LOGIN_MAX_FAILURES_PER_IDENTIFIER`, `LOGIN_MAX_FAILURES_PER_IP`, `SESSION_IDLE_TIMEOUT_MINUTES`, `CAPTCHA_MAX_PER_IP_PER_HOUR`, `LOGIN_CAPTCHA_AFTER_FAILURES` | defaults 5 / 20 / 60 / 60 / 3 | Optional tuning. |
 | `FRONTEND_DIST` | *(unset)* | Only if you want the API itself to serve a built SPA; not used with the Vercel setup. |
 
 **No CORS, cookie-domain or allowed-origin variable exists**: because the Vercel rewrite makes the browser see a
@@ -123,7 +120,7 @@ single origin, none is needed. The session cookie (`cc_session`) is `HttpOnly`, 
 
 1. Wait for the deploy to go **Live**.
 2. `https://<service>.onrender.com/healthz` returns HTTP 200 `{"status":"ok"}`.
-3. `https://<service>.onrender.com/api/meta` returns `{"app":"Campus Connect","demo_otp_enabled":true,...}`.
+3. `https://<service>.onrender.com/api/meta` returns `{"app":"Campus Connect"}`.
    (The API alone has no UI, and `/docs` is intentionally disabled in production.)
 4. Check the Render Logs: one process, a line `Admin bootstrap: created` (first deploy) or `exists`, no tracebacks.
 
@@ -200,7 +197,7 @@ that points nowhere. Two ways to set it:
   browser only sees the Vercel origin it is a first-party, host-only cookie: nothing needs `SameSite=None`.
 - **Client IP.** Vercel appends the real client address to `X-Forwarded-For`; Render's load balancer appends
   Vercel's. With `TRUST_PROXY=1` and `TRUST_PROXY_HOPS=2` the app takes the second entry from the right as the
-  client, so login throttling and OTP limits work per real user. With the wrong hop count every user would
+  client, so login throttling and captcha limits work per real user. With the wrong hop count every user would
   appear to share one proxy IP (and lock each other out), or a client could spoof its address.
 - **CSRF.** Every `POST/PUT/PATCH/DELETE` must send `X-CSRFToken` equal to the token in the session. The SPA
   gets the token from `GET /api/auth/session` (and from login/logout responses) and sends it automatically.
@@ -227,7 +224,7 @@ that points nowhere. Two ways to set it:
 - [ ] `/api/*` responses are `Cache-Control: no-store` (also check `x-vercel-cache` is not `HIT`).
 - [ ] Admin -> Academics shows CSE with AIML, AIDE, GenAI, Cybersecurity, Blockchain, IoT.
 - [ ] Register a faculty account; Admin assigns it a class (e.g. CSE -> AIML -> 3rd Year -> A).
-- [ ] Register a student in that class; the OTP step works (on-screen OTP in demo mode).
+- [ ] Register a student in that class; the signup form (with its captcha) works.
 - [ ] Student sees the assigned faculty; chat and a meeting request between them work.
 - [ ] A second faculty member *not* assigned to that class cannot open that class or message the student (403).
 - [ ] Upload a profile picture and a chat attachment; both display after a page reload (proves `/uploads`
@@ -311,7 +308,6 @@ rerun. Budget it as a small project of its own. Until then keep one worker and t
 | Render health check failing | Check Logs; a missing or short `SECRET_KEY` makes production start-up fail by design. |
 | Duplicate meeting reminders | More than one process is running: restore `--workers 1`. |
 | Login throttling locks everybody out | `TRUST_PROXY` / `TRUST_PROXY_HOPS` are wrong so all users share one IP (a proxy address). Check the hop count (2 with Vercel, 1 without). |
-| Signup says delivery unavailable | `SHOW_DEMO_OTP=0` with no SMTP configured, so no OTP channel exists. |
 
 ## 7. Owner action list
 
@@ -331,4 +327,3 @@ rerun. Budget it as a small project of its own. Until then keep one worker and t
 
 **Afterwards**
 - Schedule backups (section 4) and keep one off-site copy.
-- Once SMTP is configured, set `SHOW_DEMO_OTP=0`.

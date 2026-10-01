@@ -7,3 +7,4 @@ python-dotenv==1.0.1
 APScheduler==3.10.4
 # Werkzeug is used standalone: password hashing + secure_filename.
 Werkzeug==3.0.4
+Pillow==12.3.0

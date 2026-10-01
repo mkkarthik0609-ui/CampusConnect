@@ -5,7 +5,6 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from api.db import get_db
-from services import otp_service
 
 logger = logging.getLogger("campusconnect.api")
 
@@ -25,5 +24,5 @@ def healthz():
 
 @router.get("/api/meta")
 def meta():
-    """Public, non-sensitive app metadata for the SPA (e.g. whether the signup OTP is shown on screen)."""
-    return {"app": "Campus Connect", "demo_otp_enabled": otp_service.delivery_mode() == "demo"}
+    """Public, non-sensitive app metadata for the SPA."""
+    return {"app": "Campus Connect"}

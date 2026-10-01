@@ -53,7 +53,7 @@ beneath it without touching their rows.
 
 ## 3. Student registration
 
-1. Student verifies their college email with an OTP (`/signup/student`).
+1. Student opens `/signup/student` (college email + password + captcha).
 2. On the details page they pick **Branch, Department, Year, Section** from the Admin-defined tree
    (`/academic/tree.json` supplies the active options) and submit a `section_id`.
 3. `auth_service.register_student()` calls `resolve_section()` and stores `students.section_id`;

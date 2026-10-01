@@ -36,46 +36,35 @@ Errors:
 ## `POST /api/auth/logout`
 Public (idempotent). No body. 200 `{"ok": true, "message": "You have been signed out.", "csrf_token": "new-token"}`.
 
-## Student signup (3 steps)
-All three steps must be performed from the **same browser session** (same cookie).
-
-### `POST /api/auth/signup/student/start`
-Body `{"college_email": "asha@college.edu"}`. Sends a 6-digit OTP (valid 10 minutes).
+## `GET /api/auth/captcha`
+Public. A fresh **image captcha** (distorted letters + digits, case-insensitive). No-store.
 ```json
-{ "ok": true, "message": "We sent a 6-digit verification code to asha@college.edu. It expires in 10 minutes.",
-  "email": "asha@college.edu", "delivery": "email", "expires_in_minutes": 10 }
+{ "captcha_id": "Qk3...", "image": "data:image/png;base64,iVBOR...", "expires_in_seconds": 300 }
 ```
-In **demo mode** (no SMTP configured and `SHOW_DEMO_OTP` on - see `GET /api/meta` -> `demo_otp_enabled`) the
-response has `"delivery": "demo"` and an extra `"demo_otp": "123456"` to show on screen. `demo_otp` is never
-present otherwise.
-Errors: 400 `validation_error` (`fields.college_email`, bad e-mail), 409 `conflict` (account already exists),
-429 `rate_limited` (5 codes per e-mail / 20 per IP per hour), 503 `delivery_unavailable` (no delivery channel or
-SMTP failure).
+Each challenge is **single use**: it is consumed by the first check, right or wrong, and expires after 5 minutes.
+Only an HMAC of the answer is stored server-side. Errors: 429 `rate_limited` (60 captchas per IP per hour).
+Send the answer as `captcha_id` + `captcha_answer` in the signup / login bodies. A missing, wrong, expired or
+reused captcha is `400 validation_error` with `fields.captcha`; after any such error fetch a new captcha.
 
-### `POST /api/auth/signup/student/verify`
-Body `{"college_email": "...", "otp": "123456"}`. 200 `{"ok": true, "message": "Email verified. Please complete your registration.", "email": "..."}`.
-Errors: 400 `validation_error` with `fields.otp` = `"Incorrect OTP."` / `"This OTP has expired. Please request a new one."` /
-`"Too many incorrect attempts. Please request a new OTP."` (5 attempts) / `"This OTP has already been used..."` /
-`"No OTP was generated for this email..."`.
-
-### `POST /api/auth/signup/student/register`
-Body:
+## `POST /api/auth/signup/student`
+Public, one step (no e-mail OTP). Body:
 ```json
 { "college_email": "asha@college.edu", "full_name": "Asha K", "usn": "1AB21CS001", "section_id": 19,
-  "phone": "9876543210", "personal_email": "asha@gmail.com", "password": "Str0ngPass!", "confirm_password": "Str0ngPass!" }
+  "phone": "9876543210", "personal_email": "asha@gmail.com", "password": "Str0ngPass!", "confirm_password": "Str0ngPass!",
+  "captcha_id": "Qk3...", "captcha_answer": "K7M2XQ" }
 ```
 `section_id` comes from `GET /api/academic/tree`. Success **201** `{"ok": true, "message": "Registration successful. Please sign in."}`
-(the user is *not* logged in).
-Errors: 403 `otp_not_verified` (e-mail not verified in the last 30 minutes by this browser session; consumed after a
-successful registration), 400 `validation_error` with `fields` (`full_name`, `usn`, `section_id`, `phone`,
-`personal_email`, `college_email`, `password`, `confirm_password`), 409 `conflict` (USN or e-mail taken; `fields.usn` /
+(the user is *not* logged in). The captcha is checked **first**, so accounts cannot be probed without solving one.
+Errors: 400 `validation_error` with `fields` (`captcha`, `full_name`, `usn`, `section_id`, `phone`, `personal_email`,
+`college_email`, `password`, `confirm_password`), 409 `conflict` (USN or e-mail taken; `fields.usn` /
 `fields.college_email`). Unknown extra fields are rejected with 400.
 
 ## `POST /api/auth/signup/faculty`
 Public. Body:
 ```json
 { "full_name": "Prof Rao", "faculty_code": "FAC001", "department": "AIML", "professional_email": "rao@college.edu",
-  "subjects": ["DSA", "OS"], "password": "Str0ngPass!", "confirm_password": "Str0ngPass!" }
+  "subjects": ["DSA", "OS"], "password": "Str0ngPass!", "confirm_password": "Str0ngPass!",
+  "captcha_id": "Qk3...", "captcha_answer": "K7M2XQ" }
 ```
 `subjects` may also be a comma-separated string (`"DSA, OS"`); at least one is required. `department` must be one of
 `GET /api/auth/faculty-departments` (case-insensitive). Classes are never chosen here; the admin assigns them.

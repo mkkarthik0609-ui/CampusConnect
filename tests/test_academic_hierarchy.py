@@ -14,7 +14,7 @@ from services import academic_service as svc
 from services.academic_service import AcademicError
 from tests.conftest import (
     PASSWORD, make_settings, create_admin, create_faculty, create_student, section_id_for, assign,
-    login_client, api_post, api_delete, db_one, db_all, db_count, db_exec, http_student_signup,
+    login_client, api_post, api_delete, db_one, db_all, db_count, db_exec, http_student_signup, solve_captcha,
 )
 
 DEPARTMENTS = ["AIML", "AIDE", "GenAI", "Cybersecurity", "Blockchain", "IoT"]
@@ -662,11 +662,10 @@ def test_registration_rejects_invalid_or_forged_section_ids(app, client, bad):
 
 def test_registration_rejects_missing_section_id_field(app, client):
     email = "reg3@college.edu"
-    otp = api_post(client, "/api/auth/signup/student/start", json={"college_email": email}).json()["demo_otp"]
-    assert api_post(client, "/api/auth/signup/student/verify", json={"college_email": email, "otp": otp}).status_code == 200
-    resp = api_post(client, "/api/auth/signup/student/register", json={
+    resp = api_post(client, "/api/auth/signup/student", json={
         "college_email": email, "full_name": "N", "usn": "1AB21CS102", "phone": "9999999999",
-        "personal_email": "n@example.com", "password": PASSWORD, "confirm_password": PASSWORD})
+        "personal_email": "n@example.com", "password": PASSWORD, "confirm_password": PASSWORD,
+        **solve_captcha(client)})
     body = err(resp, 400, "validation_error")
     assert "section_id" in body["fields"]
     assert db_count(app, "students") == 0

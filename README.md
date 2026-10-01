@@ -52,7 +52,7 @@ CampusConnect/
 │   ├── schemas.py          shared response shapes
 │   └── routers/            system, auth, account, academic, notifications, uploads, admin,
 │                           admin_academic, faculty, student, chat, meetings, supporting, research
-├── services/               business logic (auth, otp, academic, assignment, permission, chat, meeting,
+├── services/               business logic (auth, captcha, academic, assignment, permission, chat, meeting,
 │   │                       supporting, notification, file, session) + errors.py
 │   └── scheduling/         RESEARCH ONLY: core engine, fcfs, rule_based, intelligent, metrics,
 │                           simulator, experiment
@@ -166,8 +166,8 @@ Full rules and the file that implements each check: [`docs/ACADEMIC_HIERARCHY.md
 1. **Admin** signs in (account from section 3), reviews **Academics**, then **Assignments**.
 2. **Faculty** registers (name, Faculty ID, department, subjects, professional email, password), then asks
    for classes, or Admin assigns them directly.
-3. **Student** registers: college email, OTP (shown on screen in demo mode, e-mailed if SMTP is configured),
-   then details including the Branch / Department / Year / Section.
+3. **Student** registers: college email, details including the Branch / Department / Year / Section, a password and
+   an image captcha (letters + digits).
 4. Users sign in with email (students and faculty can also use USN / Faculty ID).
 5. The student opens **Mentor-Connect** to message the faculty assigned to their class, or finds other
    faculty and sends a **supporting-faculty request** (the faculty member must accept before chat or meetings
@@ -199,7 +199,7 @@ Full rules and the file that implements each check: [`docs/ACADEMIC_HIERARCHY.md
   class-scope rules are in `docs/ACADEMIC_HIERARCHY.md`.
 - Uploads are validated by extension, size and content, stored under generated names and served only to
   authorised signed-in users through `/uploads/*` (non-images as downloads).
-- All SQL is parameterized. Signup OTP is rate limited and hashed at rest.
+- All SQL is parameterized. Signup is protected by a single-use image captcha (answer HMAC-hashed at rest, issuing rate limited per IP); login adds one after repeated failures.
 - Proxy-aware client IP (`TRUST_PROXY`, `TRUST_PROXY_HOPS`) so rate limiting works behind Vercel and Render.
 
 ## 7. Scheduling research (summary)
@@ -234,5 +234,5 @@ Step by step, the free-plan data-loss warning, backups and limits: [`DEPLOYMENT.
 ## 9. Design constraints honored
 
 No booking calendar, no fixed meeting duration, no automatic faculty availability, no automatic no-show or
-expiry, no message deletion, no public admin signup, no college-email password storage, no paid OTP service:
+expiry, no message deletion, no public admin signup, no college-email password storage, no e-mail/OTP verification, no paid captcha service:
 see `PRD.md` section 17 and `ESD.md` section 39 for the full list this implementation was built against.

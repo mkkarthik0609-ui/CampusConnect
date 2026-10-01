@@ -1,4 +1,4 @@
-"""Data access for security features: login throttling, OTP request throttling, last-login
+"""Data access for security features: login throttling, captcha challenges, last-login
 tracking and upload authorisation lookups. All timestamps are UTC, formatted like SQLite's
 ``datetime('now')`` ("YYYY-MM-DD HH:MM:SS") so they compare correctly with default column values."""
 from datetime import datetime, timedelta, timezone
@@ -32,16 +32,19 @@ def parse_ts(value):
 def ensure_schema():
     """Idempotent: tables/indexes owned by the security layer (login_attempts lives in schema.sql)."""
     db = get_db()
+    # E-mail OTP verification was removed (captcha replaced it); drop its leftovers on existing databases.
+    db.execute("DROP TABLE IF EXISTS otp_requests")
+    db.execute("DROP TABLE IF EXISTS otp_sessions")
     db.execute(
-        """CREATE TABLE IF NOT EXISTS otp_requests (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               email TEXT NOT NULL,
+        """CREATE TABLE IF NOT EXISTS captcha_challenges (
+               id TEXT PRIMARY KEY,
+               answer_hash TEXT NOT NULL,
+               expires_at TEXT NOT NULL,
                ip TEXT,
                created_at TEXT NOT NULL DEFAULT (datetime('now'))
            )"""
     )
-    db.execute("CREATE INDEX IF NOT EXISTS idx_otp_requests_email ON otp_requests(email, created_at)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_otp_requests_ip ON otp_requests(ip, created_at)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_captcha_ip ON captcha_challenges(ip, created_at)")
     db.execute(
         """CREATE TABLE IF NOT EXISTS login_attempts (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,31 +105,37 @@ def touch_last_login(user_id):
     db.commit()
 
 
-# ---------- OTP request throttling ----------
+# ---------- captcha challenges ----------
 
-def count_recent_otp_requests_for_email(email, window_minutes=60):
-    since = fmt(utcnow() - timedelta(minutes=window_minutes))
-    return get_db().execute(
-        "SELECT COUNT(*) AS c FROM otp_requests WHERE email = ? AND created_at >= ?", (email, since)
-    ).fetchone()["c"]
-
-
-def count_recent_otp_requests_for_ip(ip, window_minutes=60):
+def count_recent_captchas_for_ip(ip, window_minutes=60):
     if not ip:
         return 0
     since = fmt(utcnow() - timedelta(minutes=window_minutes))
     return get_db().execute(
-        "SELECT COUNT(*) AS c FROM otp_requests WHERE ip = ? AND created_at >= ?", (ip, since)
+        "SELECT COUNT(*) AS c FROM captcha_challenges WHERE ip = ? AND created_at >= ?", (ip, since)
     ).fetchone()["c"]
 
 
-def record_otp_request(email, ip):
+def create_captcha(challenge_id, answer_hash, expires_at, ip):
     db = get_db()
     db.execute(
-        "INSERT INTO otp_requests (email, ip, created_at) VALUES (?, ?, ?)", (email, ip, fmt(utcnow()))
+        "INSERT INTO captcha_challenges (id, answer_hash, expires_at, ip, created_at) VALUES (?, ?, ?, ?, ?)",
+        (challenge_id, answer_hash, expires_at, ip, fmt(utcnow())),
     )
-    db.execute("DELETE FROM otp_requests WHERE created_at < ?", (fmt(utcnow() - timedelta(days=2)),))
+    # Rows are only needed until they expire / are used; the per-IP count looks back one hour.
+    db.execute("DELETE FROM captcha_challenges WHERE created_at < ?", (fmt(utcnow() - timedelta(hours=2)),))
     db.commit()
+
+
+def consume_captcha(challenge_id):
+    """Return the challenge row and delete it, atomically (None if unknown or already consumed)."""
+    db = get_db()
+    row = db.execute("SELECT * FROM captcha_challenges WHERE id = ?", (challenge_id,)).fetchone()
+    if row is None:
+        return None
+    deleted = db.execute("DELETE FROM captcha_challenges WHERE id = ?", (challenge_id,)).rowcount
+    db.commit()
+    return row if deleted == 1 else None
 
 
 # ---------- upload authorisation ----------

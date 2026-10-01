@@ -19,7 +19,7 @@ npm run lint
 Backend for `npm run dev` (from the repo root), with a throw-away database:
 
 ```
-$env:DATABASE_PATH="$env:TEMP\cc_fe_dev.db"; $env:UPLOAD_ROOT="$env:TEMP\cc_fe_uploads"; $env:SHOW_DEMO_OTP="1"
+$env:DATABASE_PATH="$env:TEMP\cc_fe_dev.db"; $env:UPLOAD_ROOT="$env:TEMP\cc_fe_uploads"
 venv\Scripts\python.exe -m uvicorn api.main:app --port 5000
 ```
 
@@ -117,12 +117,13 @@ await api.upload("/api/account/photo", toFormData({ file }), { method: "PUT" });
 |---|---|
 | session + counters | `GET /api/auth/session` -> `{ authenticated, user, csrf_token, unread_notifications, unread_messages }` |
 | sign in / out | `POST /api/auth/login { identifier, password }`, `POST /api/auth/logout` |
-| student signup | `POST /api/auth/signup/student/start`, `/verify`, `/register` (`section_id` from the class picker; demo OTP in `demo_otp`) |
+| captcha | `GET /api/auth/captcha` (single-use image; send `captcha_id` + `captcha_answer`) |
+| student signup | `POST /api/auth/signup/student` (`section_id` from the class picker, plus the captcha fields) |
 | faculty signup | `POST /api/auth/signup/faculty`, `GET /api/auth/faculty-departments` |
 | account | `POST /api/account/password`, `POST /api/account/theme` |
 | classes | `GET /api/academic/tree` (public) |
 | notifications | `GET /api/notifications`, `POST /api/notifications/:id/read`, `POST /api/notifications/read-all` |
-| flags | `GET /api/meta` (`demo_otp_enabled`) |
+| meta | `GET /api/meta` (`app`) |
 
 ## Auth (`useAuth()`)
 

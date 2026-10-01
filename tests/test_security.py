@@ -1,5 +1,5 @@
 """Security regression tests for the FastAPI backend: CSRF, throttling, session lifecycle, password
-policy, upload authorisation, headers, OTP limits, proxy handling, SPA serving, health, bootstrap."""
+policy, upload authorisation, headers, captcha, proxy handling, SPA serving, health, bootstrap."""
 import os
 import uuid
 
@@ -8,13 +8,14 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.testclient import TestClient
 
 from api.db import db_session
+from api.settings import use_settings
 from api.deps import client_ip, get_current_user, require_role
 from api.main import create_app
 from models import queries
 from services import auth_service, session_service
 from tests.conftest import (
     PASSWORD, TEST_SECRET, api_login, api_post, csrf_token, db_count, db_exec, set_session_cookie, db_one, find_section, login_client,
-    make_admin, make_settings, read_session, register_faculty, register_student, write_session,
+    make_admin, make_settings, read_session, register_faculty, register_student, solve_captcha, write_session,
 )
 
 GOOD_PASSWORD = "Str0ngPass!"
@@ -176,25 +177,37 @@ def test_same_message_for_unknown_wrong_and_inactive(app, client):
     assert bodies[0]["error"]["message"] == "Invalid email or password."
 
 
+def login_with_captcha(client, identifier, password):
+    return api_post(client, "/api/auth/login", json={"identifier": identifier, "password": password,
+                                                     **solve_captcha(client)})
+
+
+def fail_logins(client, identifier, count):
+    """`count` wrong-password attempts. From the 4th on the server wants a captcha, so supply a solved one
+    (an attempt without it would be refused before the password is even checked, and not counted)."""
+    for i in range(count):
+        resp = login_with_captcha(client, identifier, "WrongPass1") if i >= 3 else login(client, identifier, "WrongPass1")
+        assert resp.status_code == 401
+
+
 def test_lockout_after_repeated_failures(app, client):
     make_user(app, "FACULTY", "f@x.edu")
-    for _ in range(5):
-        assert login(client, "f@x.edu", "WrongPass1").status_code == 401
-    resp = login(client, "f@x.edu", GOOD_PASSWORD)  # even the right password is refused while locked
+    fail_logins(client, "f@x.edu", 5)
+    resp = login_with_captcha(client, "f@x.edu", GOOD_PASSWORD)  # even the right password is refused while locked
     assert resp.status_code == 429
     assert err(resp)["code"] == "rate_limited" and "Too many unsuccessful attempts" in err(resp)["message"]
     assert "user_id" not in read_session(client)
     # lockout applies to unknown identifiers as well (no account enumeration)
-    for _ in range(5):
-        login(client, "ghost@x.edu", "WrongPass1")
-    assert login(client, "ghost@x.edu", "WrongPass1").status_code == 429
+    fail_logins(client, "ghost@x.edu", 5)
+    assert login_with_captcha(client, "ghost@x.edu", "WrongPass1").status_code == 429
 
 
 def test_lockout_is_per_identifier_case_insensitive(app, client):
     make_user(app, "FACULTY", "f@x.edu")
-    for ident in ("f@x.edu", "F@X.EDU", " f@x.edu ", "F@x.edu", "f@X.edu"):
-        login(client, ident, "WrongPass1")
-    assert login(client, "f@x.edu", GOOD_PASSWORD).status_code == 429
+    for i, ident in enumerate(("f@x.edu", "F@X.EDU", " f@x.edu ", "F@x.edu", "f@X.edu")):
+        resp = login_with_captcha(client, ident, "WrongPass1") if i >= 3 else login(client, ident, "WrongPass1")
+        assert resp.status_code == 401
+    assert login_with_captcha(client, "f@x.edu", GOOD_PASSWORD).status_code == 429
 
 
 def test_ip_lockout_across_identifiers(tmp_path):
@@ -208,13 +221,17 @@ def test_ip_lockout_across_identifiers(tmp_path):
 
 def test_success_clears_identifier_counter_and_records_last_login(app, client):
     ids = make_user(app, "FACULTY", "f@x.edu")
+    def login_solved():  # after 3 failures the server asks for a captcha
+        return api_post(client, "/api/auth/login", json={"identifier": "f@x.edu", "password": GOOD_PASSWORD,
+                                                         **solve_captcha(client)})
+
     for _ in range(3):
         login(client, "f@x.edu", "WrongPass1")
-    assert login(client, "f@x.edu", GOOD_PASSWORD).status_code == 200
+    assert login_solved().status_code == 200
     assert db_one(app, "SELECT last_login_at FROM users WHERE id = ?", (ids["user_id"],))["last_login_at"]
     for _ in range(3):  # would be 6 total without the reset
         login(client, "f@x.edu", "WrongPass1")
-    assert login(client, "f@x.edu", GOOD_PASSWORD).status_code == 200
+    assert login_solved().status_code == 200
 
 
 def test_login_takes_constant_hash_work_for_unknown_user(app, client, monkeypatch):
@@ -231,11 +248,11 @@ def test_login_takes_constant_hash_work_for_unknown_user(app, client, monkeypatc
 def test_login_replaces_pre_login_session(app, client):
     make_user(app, "ADMIN", "a@x.edu")
     write_session(client, {"attacker_planted": "x", "csrf_token": "attacker-known-token",
-                           "otp_verified_email": "victim@x.edu"})
+                           "planted_flag": "victim@x.edu"})
     resp = login(client, "a@x.edu", GOOD_PASSWORD)
     assert resp.status_code == 200
     sess = read_session(client)
-    assert "attacker_planted" not in sess and "otp_verified_email" not in sess
+    assert "attacker_planted" not in sess and "planted_flag" not in sess
     assert sess["role"] == "ADMIN"
     assert sess["csrf_token"] != "attacker-known-token" and sess["csrf_token"] == resp.json()["csrf_token"]
 
@@ -392,7 +409,7 @@ def test_signup_enforces_password_policy(client):
     resp = api_post(client, "/api/auth/signup/faculty", json={
         "full_name": "P", "faculty_code": "FAC9", "department": "AIML",
         "professional_email": "p@x.edu", "subjects": "DSA",
-        "password": "alllowercase1", "confirm_password": "alllowercase1"})
+        "password": "alllowercase1", "confirm_password": "alllowercase1", **solve_captcha(client)})
     assert resp.status_code == 400 and "uppercase" in err(resp)["message"]
     assert "password" in err(resp)["fields"]
 
@@ -401,7 +418,7 @@ def test_signup_rejects_password_equal_to_faculty_id(client):
     resp = api_post(client, "/api/auth/signup/faculty", json={
         "full_name": "P", "faculty_code": "Fac9Pass1", "department": "AIML",
         "professional_email": "p@x.edu", "subjects": "DSA",
-        "password": "Fac9Pass1", "confirm_password": "Fac9Pass1"})
+        "password": "Fac9Pass1", "confirm_password": "Fac9Pass1", **solve_captcha(client)})
     assert resp.status_code == 400 and "same as" in err(resp)["message"]
 
 
@@ -796,203 +813,159 @@ def test_no_spa_build_gives_json_404(client):
     assert resp.status_code == 404 and resp.json()["error"]["code"] == "not_found"
 
 
-# ---------------------------------------------------------------- OTP
+# ---------------------------------------------------------------- captcha
 
-def start(client, email):
-    return api_post(client, "/api/auth/signup/student/start", json={"college_email": email})
-
-
-def verify(client, email, otp):
-    return api_post(client, "/api/auth/signup/student/verify", json={"college_email": email, "otp": otp})
+def get_captcha(client):
+    resp = client.get("/api/auth/captcha")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
 
 
-def wrong_otp(otp):
-    return "000000" if otp != "000000" else "111111"
+def test_captcha_challenge_shape_and_no_answer_leak(app, client):
+    import base64
+    import io
+    from PIL import Image
+    resp = client.get("/api/auth/captcha")
+    body = resp.json()
+    assert resp.headers["cache-control"] == "no-store"
+    assert set(body) == {"captcha_id", "image", "expires_in_seconds"} and body["expires_in_seconds"] == 300
+    assert body["image"].startswith("data:image/png;base64,")
+    img = Image.open(io.BytesIO(base64.b64decode(body["image"].split(",", 1)[1])))
+    assert img.format == "PNG" and img.size == (240, 84)
+    # only an HMAC of the answer is stored, never the answer itself
+    row = db_one(app, "SELECT * FROM captcha_challenges WHERE id = ?", (body["captcha_id"],))
+    assert len(row["answer_hash"]) == 64 and all(c in "0123456789abcdef" for c in row["answer_hash"])
 
 
-def test_otp_rate_limit_per_email(client):
-    for _ in range(5):
-        assert "demo_otp" in start(client, "new@x.edu").json()
-    resp = start(client, "new@x.edu")
+def test_captcha_text_has_letters_and_digits_and_no_lookalikes():
+    from services import captcha_service as cs
+    for _ in range(200):
+        text = cs._random_text(6)
+        assert len(text) == 6 and any(c.isalpha() for c in text) and any(c.isdigit() for c in text)
+        assert not set(text) & set("01OIL")
+
+
+def test_captcha_is_case_insensitive_and_single_use(app, client):
+    solved = solve_captcha(client, "Ab3xY9")
+    from services import captcha_service as cs
+    with use_settings(app.state.settings), db_session(app.state.settings):
+        cs.verify(solved["captcha_id"], " ab3 xy9 ")  # case / spaces ignored
+        with pytest.raises(cs.CaptchaError):
+            cs.verify(solved["captcha_id"], "Ab3xY9")  # already consumed
+
+
+def test_wrong_guess_burns_the_challenge_so_it_cannot_be_brute_forced(app, client):
+    from services import captcha_service as cs
+    solved = solve_captcha(client, "K7M2XQ")
+    with use_settings(app.state.settings), db_session(app.state.settings):
+        with pytest.raises(cs.CaptchaError, match="Incorrect"):
+            cs.verify(solved["captcha_id"], "AAAAAA")
+        with pytest.raises(cs.CaptchaError):  # even the right answer no longer works
+            cs.verify(solved["captcha_id"], "K7M2XQ")
+    assert db_count(app, "captcha_challenges", "id = ?", (solved["captcha_id"],)) == 0
+
+
+def test_captcha_answer_is_bound_to_its_own_challenge(app, client):
+    from services import captcha_service as cs
+    a, b = solve_captcha(client, "AAAA11"), solve_captcha(client, "BBBB22")
+    with use_settings(app.state.settings), db_session(app.state.settings):
+        with pytest.raises(cs.CaptchaError):
+            cs.verify(a["captcha_id"], "BBBB22")
+        cs.verify(b["captcha_id"], "BBBB22")
+
+
+def test_expired_and_unknown_captchas_are_rejected(app, client):
+    from services import captcha_service as cs
+    solved = solve_captcha(client, "K7M2XQ")
+    db_exec(app, "UPDATE captcha_challenges SET expires_at = '2000-01-01 00:00:00' WHERE id = ?",
+            (solved["captcha_id"],))
+    with use_settings(app.state.settings), db_session(app.state.settings):
+        with pytest.raises(cs.CaptchaError, match="expired"):
+            cs.verify(solved["captcha_id"], "K7M2XQ")
+        for bad_id, bad_answer in (("does-not-exist", "K7M2XQ"), ("", "K7M2XQ"), (None, "x"), (solved["captcha_id"], "")):
+            with pytest.raises(cs.CaptchaError):
+                cs.verify(bad_id, bad_answer)
+
+
+def test_captcha_issuing_is_rate_limited_per_ip(tmp_path):
+    c = TestClient(create_app(make_settings(tmp_path, captcha_max_per_ip_per_hour=3)))
+    for _ in range(3):
+        assert c.get("/api/auth/captcha").status_code == 200
+    resp = c.get("/api/auth/captcha")
     assert resp.status_code == 429 and err(resp)["code"] == "rate_limited"
-    assert "Too many verification codes" in err(resp)["message"] and "demo_otp" not in resp.text
-    assert "demo_otp" in start(client, "else@x.edu").json()  # another email is unaffected
 
 
-def test_otp_rate_limit_per_ip(tmp_path):
-    c = TestClient(create_app(make_settings(tmp_path, otp_max_per_ip_per_hour=3)))
-    for i in range(3):
-        assert start(c, f"u{i}@x.edu").status_code == 200
-    assert start(c, "u99@x.edu").status_code == 429
+def test_signup_endpoints_refuse_without_a_valid_captcha(app, client):
+    from tests.conftest import find_section
+    sid = find_section(app=app)
+    student = {"college_email": "c1@x.edu", "full_name": "C", "usn": "1AB21CS701", "section_id": sid,
+               "phone": "9999999999", "personal_email": "c@example.com", "password": GOOD_PASSWORD,
+               "confirm_password": GOOD_PASSWORD}
+    faculty = {"full_name": "F", "faculty_code": "FC701", "department": "AIML", "professional_email": "fc701@x.edu",
+               "subjects": "DSA", "password": GOOD_PASSWORD, "confirm_password": GOOD_PASSWORD}
+    for url, payload in (("/api/auth/signup/student", student), ("/api/auth/signup/faculty", faculty)):
+        for extra in ({}, {"captcha_id": "nope", "captcha_answer": "ABC123"},
+                      {**solve_captcha(client), "captcha_answer": "WRONG9"}):
+            resp = api_post(client, url, json={**payload, **extra})
+            assert resp.status_code == 400 and "captcha" in err(resp)["fields"], (url, extra, resp.text)
+    assert db_count(app, "users") == 0
 
 
-def test_otp_is_hashed_at_rest_and_generated_with_requested_length(app, client):
-    otp = start(client, "new@x.edu").json()["demo_otp"]
-    assert len(otp) == 6 and otp.isdigit()
-    row = db_one(app, "SELECT otp_hash FROM otp_sessions WHERE email = 'new@x.edu'")
-    assert otp not in row["otp_hash"] and len(row["otp_hash"]) == 64
+def test_captcha_is_checked_before_account_probing(app, client):
+    """An existing email must not be discoverable without solving a captcha (no enumeration)."""
+    from tests.conftest import find_section, register_student
+    register_student(app, "1AB21CS702", email="taken@x.edu")
+    payload = {"college_email": "taken@x.edu", "full_name": "C", "usn": "1AB21CS703",
+               "section_id": find_section(app=app), "phone": "9999999999", "personal_email": "c@example.com",
+               "password": GOOD_PASSWORD, "confirm_password": GOOD_PASSWORD}
+    resp = api_post(client, "/api/auth/signup/student", json=payload)
+    assert resp.status_code == 400 and "college_email" not in err(resp).get("fields", {})
+    solved = api_post(client, "/api/auth/signup/student", json={**payload, **solve_captcha(client)})
+    assert solved.status_code == 409
 
 
-def test_otp_flow_binds_verification_to_browser_session(app, client):
-    email, sid = "new@x.edu", find_section(app=app)
-    otp = start(client, email).json()["demo_otp"]
-    bad = verify(client, email, wrong_otp(otp))
-    assert bad.status_code == 400 and err(bad)["fields"]["otp"] == "Incorrect OTP."
-    assert verify(client, email, otp).status_code == 200
-    payload = {"college_email": email, "full_name": "N", "usn": "1AB21CS555", "section_id": sid,
-               "phone": "9999999999", "personal_email": "n@example.com", "password": PASSWORD,
-               "confirm_password": PASSWORD}
-    # a different browser cannot reuse someone else's verified email
-    other = TestClient(app)
-    resp = api_post(other, "/api/auth/signup/student/register", json=payload)
-    assert resp.status_code == 403 and err(resp)["code"] == "otp_not_verified"
-    assert api_post(client, "/api/auth/signup/student/register", json=payload).status_code == 201
+def test_login_needs_no_captcha_until_repeated_failures(app, client):
+    make_user(app, "FACULTY", "f@x.edu")
+    for _ in range(2):
+        assert login(client, "f@x.edu", "WrongPass1").status_code == 401
+    assert login(client, "f@x.edu", GOOD_PASSWORD).status_code == 200  # still fine, no captcha involved
 
 
-def test_otp_verification_cannot_be_transplanted_to_another_email(app, client):
-    otp = start(client, "a@x.edu").json()["demo_otp"]
-    verify(client, "a@x.edu", otp)
-    resp = api_post(client, "/api/auth/signup/student/register", json={
-        "college_email": "b@x.edu", "full_name": "N", "usn": "1AB21CS556", "section_id": find_section(app=app),
-        "phone": "9999999999", "personal_email": "n@example.com", "password": PASSWORD,
-        "confirm_password": PASSWORD})
-    assert resp.status_code == 403
+def test_login_demands_captcha_after_failures_then_accepts_a_solved_one(app, client):
+    make_user(app, "FACULTY", "f@x.edu")
+    for _ in range(3):
+        assert login(client, "f@x.edu", "WrongPass1").status_code == 401
+    # the right password alone is no longer enough
+    resp = login(client, "f@x.edu", GOOD_PASSWORD)
+    assert resp.status_code == 400 and err(resp)["code"] == "captcha_required"
+    bad = api_post(client, "/api/auth/login", json={"identifier": "f@x.edu", "password": GOOD_PASSWORD,
+                                                    **solve_captcha(client), "captcha_answer": "WRONG9"})
+    assert bad.status_code == 400 and "captcha" in err(bad)["fields"]
+    ok = api_post(client, "/api/auth/login", json={"identifier": "f@x.edu", "password": GOOD_PASSWORD,
+                                                   **solve_captcha(client)})
+    assert ok.status_code == 200
+    # a successful login clears the failure counter, so no captcha is needed next time
+    assert login(TestClient(app), "f@x.edu", GOOD_PASSWORD).status_code == 200
 
 
-def test_otp_verified_state_expires(app, client):
-    email = "new@x.edu"
-    otp = start(client, email).json()["demo_otp"]
-    verify(client, email, otp)
-    sess = read_session(client)
-    sess["otp_verified_at"] -= 31 * 60
-    write_session(client, sess)
-    resp = api_post(client, "/api/auth/signup/student/register", json={
-        "college_email": email, "full_name": "N", "usn": "1AB21CS557", "section_id": find_section(app=app),
-        "phone": "9999999999", "personal_email": "n@example.com", "password": PASSWORD,
-        "confirm_password": PASSWORD})
-    assert resp.status_code == 403
+def test_login_captcha_requirement_does_not_reveal_whether_an_account_exists(app, client):
+    make_user(app, "FACULTY", "f@x.edu")
+    for ident in ("f@x.edu", "ghost@x.edu"):
+        c = TestClient(app)
+        for _ in range(3):
+            login(c, ident, "WrongPass1")
+        resp = login(c, ident, "WrongPass1")
+        assert resp.status_code == 400 and err(resp)["code"] == "captcha_required", ident
 
 
-def test_otp_attempt_cap(client):
-    otp = start(client, "new@x.edu").json()["demo_otp"]
-    for _ in range(5):
-        verify(client, "new@x.edu", wrong_otp(otp))
-    resp = verify(client, "new@x.edu", otp)
-    assert resp.status_code == 400 and "Too many incorrect attempts" in err(resp)["message"]
-
-
-def test_otp_expiry(app, client):
-    otp = start(client, "new@x.edu").json()["demo_otp"]
-    db_exec(app, "UPDATE otp_sessions SET expires_at = '2000-01-01T00:00:00' WHERE email = 'new@x.edu'")
-    resp = verify(client, "new@x.edu", otp)
-    assert resp.status_code == 400 and "expired" in err(resp)["message"]
-
-
-def test_otp_cannot_be_reused(client):
-    otp = start(client, "new@x.edu").json()["demo_otp"]
-    assert verify(client, "new@x.edu", otp).status_code == 200
-    again = verify(client, "new@x.edu", otp)
-    assert again.status_code == 400 and "already been used" in err(again)["message"]
-
-
-def test_otp_is_emailed_not_shown_when_smtp_configured(tmp_path, monkeypatch):
-    import re
-    app = create_app(make_settings(tmp_path, smtp_host="smtp.test", smtp_port=587, smtp_user="u",
-                                   smtp_password="p", smtp_from="cc@test", show_demo_otp=True))
-    sent = []
-
-    class FakeSMTP:
-        def __init__(self, host, port, timeout=None):
-            self.host = host
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def starttls(self):
-            pass
-
-        def login(self, user, password):
-            pass
-
-        def send_message(self, msg):
-            sent.append(msg)
-
-    monkeypatch.setattr("services.otp_service.smtplib.SMTP", FakeSMTP)
-    c = TestClient(app)
-    resp = start(c, "new@x.edu")
-    assert resp.status_code == 200
-    assert len(sent) == 1 and sent[0]["To"] == "new@x.edu"
-    code = re.search(r"code is (\d{6})", sent[0].get_content()).group(1)
-    assert code not in resp.text and "demo_otp" not in resp.text
-    assert resp.json()["delivery"] == "email"
-    assert c.get("/api/meta").json()["demo_otp_enabled"] is False
-
-
-def test_otp_is_emailed_via_resend_not_shown(tmp_path, monkeypatch):
-    import json
-    import re
-    app = create_app(make_settings(tmp_path, resend_api_key="re_test", resend_from="cc@test.dev",
-                                   show_demo_otp=True))
-    sent = []
-
-    class FakeResp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    def fake_urlopen(req, timeout=None):
-        sent.append((req.full_url, req.headers, json.loads(req.data)))
-        return FakeResp()
-
-    monkeypatch.setattr("services.otp_service.urllib.request.urlopen", fake_urlopen)
-    c = TestClient(app)
-    resp = start(c, "new@x.edu")
-    assert resp.status_code == 200 and resp.json()["delivery"] == "email"
-    url, headers, body = sent[0]
-    assert url == "https://api.resend.com/emails" and headers["Authorization"] == "Bearer re_test"
-    assert body["to"] == ["new@x.edu"] and body["from"] == "cc@test.dev"
-    code = re.search(r"code is (\d{6})", body["text"]).group(1)
-    assert code not in resp.text and "demo_otp" not in resp.text
-    assert c.get("/api/meta").json()["demo_otp_enabled"] is False
-
-
-def test_resend_failure_is_reported_without_leaking(tmp_path, monkeypatch):
-    import urllib.error
-    app = create_app(make_settings(tmp_path, resend_api_key="re_secret_key"))
-
-    def boom(*a, **k):
-        raise urllib.error.URLError("secret network detail")
-    monkeypatch.setattr("services.otp_service.urllib.request.urlopen", boom)
-    resp = start(TestClient(app), "new@x.edu")
-    assert resp.status_code == 503 and err(resp)["code"] == "delivery_unavailable"
-    assert "secret network detail" not in resp.text and "re_secret_key" not in resp.text
-
-
-def test_smtp_failure_is_reported_without_leaking(tmp_path, monkeypatch):
-    import smtplib
-    app = create_app(make_settings(tmp_path, smtp_host="smtp.test"))
-
-    def boom(*a, **k):
-        raise smtplib.SMTPException("secret smtp detail")
-    monkeypatch.setattr("services.otp_service.smtplib.SMTP", boom)
-    resp = start(TestClient(app), "new@x.edu")
-    assert resp.status_code == 503 and err(resp)["code"] == "delivery_unavailable"
-    assert "secret smtp detail" not in resp.text
-
-
-def test_no_delivery_channel_refuses_to_issue_otp(tmp_path):
-    app = create_app(make_settings(tmp_path, show_demo_otp=False, smtp_host=""))
-    c = TestClient(app)
-    resp = start(c, "new@x.edu")
-    assert resp.status_code == 503 and "not available" in err(resp)["message"]
-    assert c.get("/api/meta").json()["demo_otp_enabled"] is False
-    with db_session(app.state.settings):
-        assert queries.get_latest_otp_session("new@x.edu") is None
+def test_login_captcha_does_not_bypass_the_lockout(app, client):
+    make_user(app, "FACULTY", "f@x.edu")
+    for i in range(5):
+        api_post(client, "/api/auth/login", json={"identifier": "f@x.edu", "password": "WrongPass1",
+                                                  **(solve_captcha(client) if i >= 3 else {})})
+    resp = api_post(client, "/api/auth/login", json={"identifier": "f@x.edu", "password": GOOD_PASSWORD,
+                                                     **solve_captcha(client)})
+    assert resp.status_code == 429 and err(resp)["code"] == "rate_limited"
 
 
 # ---------------------------------------------------------------- admin bootstrap
