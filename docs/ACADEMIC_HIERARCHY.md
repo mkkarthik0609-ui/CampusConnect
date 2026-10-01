@@ -32,8 +32,8 @@ accepted for new data; legacy values like `3A` are normalised to `A` when backfi
 
 ## 2. Admin authority
 
-Only `ADMIN` users (routes in `routes/admin_academic.py`, all guarded by
-`@role_required("ADMIN")`) can:
+Only `ADMIN` users (routes in `api/routers/admin_academic.py`, all guarded by
+`require_role("ADMIN")`) can:
 
 - add a branch, department, year, or sections (`/admin/academics/...`);
 - deactivate / reactivate any level (hides it from new registrations; existing data is kept);
@@ -63,7 +63,7 @@ beneath it without touching their rows.
 
 A student cannot edit their class, and the profile-change workflow cannot be used to move class:
 
-- `permission_service.STUDENT_EDITABLE_FIELDS = {"phone", "personal_email"}`; `routes/student.py`
+- `permission_service.STUDENT_EDITABLE_FIELDS = {"phone", "personal_email"}`; `api/routers/student.py`
   only forwards those two fields, and the service drops anything outside the allow-list.
 - If a student registered in the wrong class, Admin uses **Remove registration**
   (`POST /admin/students/<id>/remove-registration`, `aq.archive_student_registration`). This
@@ -94,21 +94,21 @@ A student cannot edit their class, and the profile-change workflow cannot be use
 
 ## 5. Enforced access rules (server-side)
 
-All rules are enforced on the server; hiding links in templates is never relied upon.
+All rules are enforced on the server; hiding links in the UI is never relied upon.
 
 | Rule | Implemented in |
 |---|---|
 | A faculty member "owns" a student only if the student's `section_id` has an **active** assignment for that faculty, and the whole section/year/department/branch chain is active | `models/academic_queries.py` -> `is_student_in_faculty_scope(faculty_id, student_id)` |
-| Faculty may open a class page only for an active assignment of their own (otherwise HTTP 403) | `routes/faculty.py` -> `class_detail` (calls `aq.is_faculty_assigned_to_section`, `abort(403)`) |
+| Faculty may open a class page only for an active assignment of their own (otherwise HTTP 403) | `api/routers/faculty.py` (class endpoints; HTTP 403 unless `aq.is_faculty_assigned_to_section`) |
 | Student <-> faculty reachability = class scope **or** an ACCEPTED supporting relationship | `models/queries.py` -> `is_faculty_accessible_to_student` / `is_student_accessible_to_faculty`; mirrored in `services/assignment_service.py` -> `faculty_can_access_student` / `student_can_access_faculty` |
-| Only Admin can grant or revoke assignments; faculty can only *request* | `services/assignment_service.py` (`admin_assign`, `admin_remove`, `faculty_request`, `decide_request`) + `routes/admin_academic.py` (`@role_required("ADMIN")`) |
+| Only Admin can grant or revoke assignments; faculty can only *request* | `services/assignment_service.py` (`admin_assign`, `admin_remove`, `faculty_request`, `decide_request`) + `api/routers/admin_academic.py` (`require_role("ADMIN")`) |
 | Opening / reading / sending in a chat requires participation **and** current scope (a student moved out of the faculty's classes becomes unreadable to that faculty) | `services/chat_service.py` -> `open_chat`, `open_chat_as_faculty`, `get_chat_for_participant` |
 | Meeting requests need scope or accepted supporting link; faculty can respond only for students still in scope | `services/meeting_service.py` -> `request_meeting`, `respond_to_meeting` |
 | Faculty may only send a supporting-relationship request to students in their classes | `services/supporting_service.py` -> `faculty_request_student` |
 | Only the student's own in-scope faculty may approve that student's profile-change request | `services/permission_service.py` -> `decide_permission_request` |
 | Faculty student search is limited to their assigned classes | `models/academic_queries.py` -> `search_students_in_faculty_scope` |
 | Client-supplied section ids must exist and be fully active | `services/academic_service.py` -> `resolve_section` |
-| Student class cannot be self-edited | `services/permission_service.py` (`STUDENT_EDITABLE_FIELDS`), `routes/student.py` |
+| Student class cannot be self-edited | `services/permission_service.py` (`STUDENT_EDITABLE_FIELDS`), `api/routers/student.py` |
 
 Consequences worth knowing:
 

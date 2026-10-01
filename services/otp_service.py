@@ -1,7 +1,9 @@
 """Email-verification OTPs for student signup.
 
 Delivery: if SMTP_HOST is configured the code is emailed and never shown on screen. Otherwise the
-code is shown on screen (demo mode) only while config SHOW_DEMO_OTP is true."""
+code is returned to the caller (demo mode) only while settings.show_demo_otp is true.
+
+The "verified in this browser session" helpers take the signed-cookie ``session`` dict explicitly."""
 import hashlib
 import hmac
 import logging
@@ -10,8 +12,7 @@ import smtplib
 from datetime import timedelta
 from email.message import EmailMessage
 
-from flask import current_app, has_request_context, request, session
-
+from api.settings import get_settings
 from models import queries
 from models import security_queries as sq
 from services.auth_service import ValidationError
@@ -23,7 +24,11 @@ SESSION_TIME_KEY = "otp_verified_at"
 
 
 class OtpRateLimitError(ValidationError):
-    pass
+    """Too many codes requested for this email / IP -> HTTP 429."""
+
+
+class DeliveryError(ValidationError):
+    """The verification email could not be sent (SMTP failure) or no delivery channel exists -> HTTP 503."""
 
 
 def normalize_email(email):
@@ -32,22 +37,23 @@ def normalize_email(email):
 
 def delivery_mode():
     """'smtp', 'demo' (on-screen) or 'none'."""
-    if current_app.config.get("SMTP_HOST"):
+    cfg = get_settings()
+    if cfg.smtp_host:
         return "smtp"
-    if current_app.config.get("SHOW_DEMO_OTP"):
+    if cfg.show_demo_otp:
         return "demo"
     return "none"
 
 
 def _hash_otp(email, otp):
-    key = str(current_app.config["SECRET_KEY"]).encode("utf-8")
+    key = str(get_settings().secret_key).encode("utf-8")
     return hmac.new(key, f"otp:{email}:{otp}".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def _check_rate_limit(email, ip):
-    cfg = current_app.config
-    if sq.count_recent_otp_requests_for_email(email) >= cfg["OTP_MAX_PER_EMAIL_PER_HOUR"] or (
-        ip and sq.count_recent_otp_requests_for_ip(ip) >= cfg["OTP_MAX_PER_IP_PER_HOUR"]
+    cfg = get_settings()
+    if sq.count_recent_otp_requests_for_email(email) >= cfg.otp_max_per_email_per_hour or (
+        ip and sq.count_recent_otp_requests_for_ip(ip) >= cfg.otp_max_per_ip_per_hour
     ):
         raise OtpRateLimitError("Too many verification codes requested. Please try again in an hour.")
 
@@ -56,12 +62,10 @@ def generate_and_store_otp(email, ip=None):
     """Create and store a new OTP for `email` and return the plaintext code (caller delivers it).
     Raises OtpRateLimitError beyond 5 codes per email / per IP per hour."""
     email = normalize_email(email)
-    if ip is None and has_request_context():
-        ip = request.remote_addr
     _check_rate_limit(email, ip)
-    length = current_app.config["OTP_LENGTH"]
+    length = get_settings().otp_length
     otp = "".join(secrets.choice("0123456789") for _ in range(length))
-    expires_at = (sq.utcnow() + timedelta(minutes=current_app.config["OTP_EXPIRY_MINUTES"])).isoformat()
+    expires_at = (sq.utcnow() + timedelta(minutes=get_settings().otp_expiry_minutes)).isoformat()
     queries.create_otp_session(email, _hash_otp(email, otp), expires_at)
     sq.record_otp_request(email, ip)
     return otp
@@ -69,33 +73,33 @@ def generate_and_store_otp(email, ip=None):
 
 def deliver_otp(email, otp):
     """Email the OTP when SMTP is configured. Returns True if emailed, False if the caller should
-    fall back to the on-screen demo. Raises ValidationError if sending fails."""
-    cfg = current_app.config
-    if not cfg.get("SMTP_HOST"):
+    fall back to the on-screen demo. Raises DeliveryError (a ValidationError) if sending fails."""
+    cfg = get_settings()
+    if not cfg.smtp_host:
         return False
     msg = EmailMessage()
     msg["Subject"] = "Your Campus Connect verification code"
-    msg["From"] = cfg.get("SMTP_FROM") or cfg.get("SMTP_USER") or "no-reply@localhost"
+    msg["From"] = cfg.smtp_from or cfg.smtp_user or "no-reply@localhost"
     msg["To"] = email
     msg.set_content(
         f"Your Campus Connect verification code is {otp}.\n"
-        f"It expires in {cfg['OTP_EXPIRY_MINUTES']} minutes. If you did not request it, ignore this email."
+        f"It expires in {cfg.otp_expiry_minutes} minutes. If you did not request it, ignore this email."
     )
-    mode = (cfg.get("SMTP_TLS") or "1").lower()
+    mode = (cfg.smtp_tls or "1").lower()
     try:
         if mode == "ssl":
-            server = smtplib.SMTP_SSL(cfg["SMTP_HOST"], cfg["SMTP_PORT"], timeout=15)
+            server = smtplib.SMTP_SSL(cfg.smtp_host, cfg.smtp_port, timeout=15)
         else:
-            server = smtplib.SMTP(cfg["SMTP_HOST"], cfg["SMTP_PORT"], timeout=15)
+            server = smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=15)
         with server:
             if mode not in ("0", "false", "no", "off", "ssl"):
                 server.starttls()
-            if cfg.get("SMTP_USER"):
-                server.login(cfg["SMTP_USER"], cfg.get("SMTP_PASSWORD", ""))
+            if cfg.smtp_user:
+                server.login(cfg.smtp_user, cfg.smtp_password or "")
             server.send_message(msg)
     except (smtplib.SMTPException, OSError):
         logger.exception("Failed to send OTP email")  # never log the code itself
-        raise ValidationError("We could not send the verification email right now. Please try again later.")
+        raise DeliveryError("We could not send the verification email right now. Please try again later.")
     return True
 
 
@@ -106,7 +110,7 @@ def verify_otp(email, submitted_otp):
         return False, "No OTP was generated for this email. Please request a new one."
     if session_row["verified"]:
         return False, "This OTP has already been used. Please request a new one."
-    if session_row["attempt_count"] >= current_app.config["OTP_MAX_ATTEMPTS"]:
+    if session_row["attempt_count"] >= get_settings().otp_max_attempts:
         return False, "Too many incorrect attempts. Please request a new OTP."
     expires = sq.parse_ts(session_row["expires_at"])
     if expires is None or sq.utcnow() > expires:
@@ -129,19 +133,19 @@ def is_email_otp_verified(email, max_age_minutes=None):
     if not (session_row and session_row["verified"]):
         return False
     if max_age_minutes is None:
-        max_age_minutes = current_app.config["OTP_VERIFIED_MAX_AGE_MINUTES"]
+        max_age_minutes = get_settings().otp_verified_max_age_minutes
     created = sq.parse_ts(session_row["created_at"])
     return bool(created and sq.utcnow() - created <= timedelta(minutes=max_age_minutes))
 
 
 # ---- binding the verified email to the browser session ----
 
-def remember_verified_in_session(email):
+def remember_verified_in_session(session, email):
     session[SESSION_EMAIL_KEY] = normalize_email(email)
     session[SESSION_TIME_KEY] = int(sq.utcnow().timestamp())
 
 
-def is_verified_in_session(email):
+def is_verified_in_session(session, email):
     """The email was verified by *this* browser session within OTP_VERIFIED_MAX_AGE_MINUTES."""
     if session.get(SESSION_EMAIL_KEY) != normalize_email(email):
         return False
@@ -149,9 +153,9 @@ def is_verified_in_session(email):
     if not isinstance(verified_at, int):
         return False
     age = sq.utcnow().timestamp() - verified_at
-    return 0 <= age <= current_app.config["OTP_VERIFIED_MAX_AGE_MINUTES"] * 60
+    return 0 <= age <= get_settings().otp_verified_max_age_minutes * 60
 
 
-def clear_verified_in_session():
+def clear_verified_in_session(session):
     session.pop(SESSION_EMAIL_KEY, None)
     session.pop(SESSION_TIME_KEY, None)

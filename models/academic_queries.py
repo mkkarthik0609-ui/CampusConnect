@@ -171,7 +171,8 @@ def find_combo_by_names(branch, department, year, section):
 def list_combos_with_counts():
     return get_db().execute(
         """SELECT c.*,
-              (SELECT COUNT(*) FROM students st WHERE st.section_id = c.section_id) AS student_count,
+              (SELECT COUNT(*) FROM students st JOIN users su ON su.id = st.user_id
+                 WHERE st.section_id = c.section_id AND su.is_active = 1) AS student_count,
               (SELECT COUNT(*) FROM faculty_assignments fa
                  WHERE fa.section_id = c.section_id AND fa.is_active = 1) AS faculty_count
            FROM (""" + _COMBO_SELECT + ") c ORDER BY c.branch_name, c.department_name, c.year_order, c.section_name"
@@ -342,8 +343,9 @@ def decide_assignment_request(request_id, status, reviewer_user_id):
 
 
 def list_assignment_requests(status=None, faculty_id=None):
-    sql = """SELECT r.*, f.faculty_code, u.full_name AS faculty_name, c.branch_name, c.department_name,
-                    c.year_name, c.section_name
+    sql = """SELECT r.*, f.faculty_code, f.department AS faculty_department, u.full_name AS faculty_name,
+                    u.profile_picture_path AS faculty_picture, c.branch_name, c.department_name,
+                    c.year_name, c.section_name, c.chain_active
              FROM faculty_assignment_requests r
              JOIN faculty f ON f.id = r.faculty_id
              JOIN users u ON u.id = f.user_id
@@ -388,18 +390,36 @@ def list_students_admin(section_id=None):
     return get_db().execute(sql + " ORDER BY u.is_active DESC, u.full_name", params).fetchall()
 
 
+REMOVED_MARK = "~removed-"
+
+
+def is_removed_usn(usn):
+    """True for a USN that carries the tombstone written by archive_student_registration()."""
+    return REMOVED_MARK in (usn or "")
+
+
 def archive_student_registration(student_id):
     """Deactivate the account and free its login email / USN so the person can register again.
-    Chats, meetings and notifications are kept; only the identifiers are tombstoned."""
+    Chats, meetings and notifications are kept; only the identifiers are tombstoned.
+
+    Idempotent: returns True only for the call that actually removed the registration; unknown ids and
+    already-removed students return False and are left untouched (never tombstoned twice). The
+    tombstone is claimed with a single conditional UPDATE, so two concurrent calls cannot both win."""
     db = get_db()
     st = db.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
-    if not st or "~removed-" in st["usn"]:  # unknown, or already removed (keep this idempotent)
+    if not st or is_removed_usn(st["usn"]):
         return False
     tag = f"removed-{st['id']}"
+    claimed = db.execute(
+        "UPDATE students SET usn = ?, college_email = ?, updated_at = datetime('now') "
+        "WHERE id = ? AND usn NOT LIKE '%~removed-%'",
+        (f"{st['usn']}~{tag}", f"{tag}+{st['college_email']}", st["id"]),
+    )
+    if claimed.rowcount != 1:
+        db.rollback()
+        return False
     db.execute("UPDATE users SET is_active = 0, email = ?, updated_at = datetime('now') WHERE id = ?",
                (f"{tag}+{st['college_email']}", st["user_id"]))
-    db.execute("UPDATE students SET usn = ?, college_email = ?, updated_at = datetime('now') WHERE id = ?",
-               (f"{st['usn']}~{tag}", f"{tag}+{st['college_email']}", st["id"]))
     db.execute("DELETE FROM supporting_relationships WHERE student_id = ? AND status = 'PENDING'", (st["id"],))
     db.execute(
         "UPDATE meeting_requests SET status = 'CANCELLED', cancelled_by = 'FACULTY', "

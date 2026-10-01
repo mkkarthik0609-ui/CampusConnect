@@ -36,8 +36,10 @@ uploads/**
 !uploads/chat/.gitkeep
 
 # Frontend (Vercel) build output and tooling
+# (no bare `public/` rule on purpose: it would also hide any src/**/public directory from git)
 node_modules/
-public/
+frontend/node_modules/
+frontend/dist/
 .vercel/
 
 # Tooling / editor

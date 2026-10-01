@@ -1,7 +1,9 @@
 # Runtime dependencies only (what Render installs). Dev/test tools live in requirements-dev.txt.
-Flask==3.0.3
-Werkzeug==3.0.4
-Flask-WTF==1.2.1
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+itsdangerous==2.2.0
 python-dotenv==1.0.1
 APScheduler==3.10.4
-gunicorn==23.0.0
+# Werkzeug is used standalone: password hashing + secure_filename.
+Werkzeug==3.0.4

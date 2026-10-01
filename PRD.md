@@ -3,7 +3,7 @@
 
 **Version:** 1.0  
 **Project Type:** College Python Web Application  
-**Primary Stack:** Python + Flask + SQLite + HTML/CSS/JavaScript
+**Primary Stack:** Python + FastAPI + SQLite (backend); React + Vite + Tailwind (frontend)
 
 ---
 

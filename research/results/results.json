@@ -1,0 +1,3473 @@
+{
+ "question": "Can data-driven scheduling reduce student waiting time and improve faculty-student meeting efficiency compared with the current/manual scheduling approach?",
+ "config": {
+  "world": {
+   "days": 5,
+   "day_minutes": 480,
+   "day_start_clock": "09:00",
+   "grid_min": 5,
+   "num_faculty": 12,
+   "num_students": 150,
+   "loads": {
+    "low": 240,
+    "medium": 360,
+    "high": 480
+   },
+   "durations": [
+    10,
+    15,
+    20,
+    30
+   ],
+   "duration_weights": [
+    0.25,
+    0.35,
+    0.25,
+    0.15
+   ],
+   "priority_weights": [
+    0.75,
+    0.18,
+    0.07
+   ],
+   "rush_windows": [
+    [
+     105,
+     165
+    ],
+    [
+     375,
+     435
+    ]
+   ],
+   "rush_share": 0.6,
+   "last_arrival_min_of_day": 450,
+   "lunch": [
+    180,
+    240
+   ],
+   "faculty_popularity_exponent": 0.6,
+   "student_activity_sigma": 0.9,
+   "flaky_student_share": 0.15,
+   "cancel_prob": {
+    "reliable": 0.06,
+    "flaky": 0.14
+   },
+   "no_show_prob": {
+    "reliable": 0.03,
+    "flaky": 0.2
+   },
+   "cancel_notice_choices": [
+    30,
+    60,
+    120,
+    240,
+    480,
+    960
+   ],
+   "standby_share": 0.5,
+   "window_lead_choices": [
+    0,
+    0,
+    15,
+    30,
+    60
+   ],
+   "window_width": {
+    "1": [
+     360,
+     1440
+    ],
+    "2": [
+     240,
+     960
+    ],
+    "3": [
+     120,
+     480
+    ]
+   },
+   "batch_interval_min": 15,
+   "no_show_grace_min": 5,
+   "manual_slot_min": 15,
+   "manual_collision_discovery": "meeting_start"
+  },
+  "intelligent": {
+   "weights": {
+    "priority": 3.0,
+    "fairness": 2.0,
+    "slack": 1.0,
+    "wait": 1.0,
+    "risk": 1.0,
+    "slot_wait": 6.0,
+    "pack": 1.0,
+    "spread": 0.25
+   },
+   "backfill": true,
+   "displace": true,
+   "displace_min_notice_min": 120,
+   "displace_max_delay_min": 120,
+   "min_useful_fragment_min": 10,
+   "fairness_wait_cap_min": 960,
+   "slack_scale_min": 720,
+   "risk_prior": 0.12,
+   "risk_prior_strength": 3
+  },
+  "eval_seeds": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30
+  ],
+  "tuning_seeds": [
+   1001,
+   1020
+  ],
+  "tuning_note": "Intelligent weights were hand-tuned on the tuning seeds (medium load) only; evaluation seeds were never used for tuning."
+ },
+ "methods": {
+  "fcfs": {
+   "label": "FCFS / manual",
+   "description": "Fixed 15-minute posted slots, first come first served, class timetable ignored until a clash is found (counted as a conflict), no waiting list."
+  },
+  "rule_based": {
+   "label": "Rule-based",
+   "description": "Every 30 min: sort by priority, then earliest-fit slot that respects the class timetable and the student's window. No waiting list."
+  },
+  "intelligent": {
+   "label": "Intelligent (proposed)",
+   "description": "Explainable scoring: priority + fairness aging + window slack + no-show risk decide who goes first; wait + packing + peak spreading decide where; waiting-list back-fill and urgent displacement recover lost capacity."
+  }
+ },
+ "metrics": {
+  "avg_wait_min": {
+   "label": "Average waiting time",
+   "unit": "min",
+   "better": "lower",
+   "headline": true
+  },
+  "median_wait_min": {
+   "label": "Median waiting time",
+   "unit": "min",
+   "better": "lower",
+   "headline": true
+  },
+  "p90_wait_min": {
+   "label": "90th percentile waiting time",
+   "unit": "min",
+   "better": "lower",
+   "headline": true
+  },
+  "avg_wait_incl_unserved_min": {
+   "label": "Avg wait incl. unserved (charged full window)",
+   "unit": "min",
+   "better": "lower",
+   "headline": false
+  },
+  "served_meetings": {
+   "label": "Meetings held",
+   "unit": "count",
+   "better": "higher",
+   "headline": true
+  },
+  "success_rate": {
+   "label": "Success rate (held / requested)",
+   "unit": "fraction",
+   "better": "higher",
+   "headline": true
+  },
+  "faculty_idle_min": {
+   "label": "Faculty idle time",
+   "unit": "min",
+   "better": "lower",
+   "headline": true
+  },
+  "utilization": {
+   "label": "Faculty time utilisation",
+   "unit": "fraction",
+   "better": "higher",
+   "headline": false
+  },
+  "wasted_min": {
+   "label": "Wasted booked minutes",
+   "unit": "min",
+   "better": "lower",
+   "headline": true
+  },
+  "schedule_conflicts": {
+   "label": "Schedule conflicts",
+   "unit": "count",
+   "better": "lower",
+   "headline": true
+  },
+  "cancellations": {
+   "label": "Cancellations (of booked)",
+   "unit": "count",
+   "better": null,
+   "headline": true
+  },
+  "no_shows": {
+   "label": "No-shows (of booked)",
+   "unit": "count",
+   "better": null,
+   "headline": true
+  },
+  "fairness_jain": {
+   "label": "Fairness (Jain index, per-student served rate)",
+   "unit": "index",
+   "better": "higher",
+   "headline": true
+  },
+  "fairness_wait_jain": {
+   "label": "Fairness of waiting (Jain index)",
+   "unit": "index",
+   "better": "higher",
+   "headline": false
+  },
+  "students_served": {
+   "label": "Students served",
+   "unit": "count",
+   "better": "higher",
+   "headline": true
+  },
+  "urgent_success_rate": {
+   "label": "Urgent requests held",
+   "unit": "fraction",
+   "better": "higher",
+   "headline": false
+  },
+  "urgent_avg_wait_min": {
+   "label": "Urgent avg waiting time",
+   "unit": "min",
+   "better": "lower",
+   "headline": false
+  },
+  "peak_success_rate": {
+   "label": "Rush-window requests held",
+   "unit": "fraction",
+   "better": "higher",
+   "headline": false
+  },
+  "backfilled_meetings": {
+   "label": "Meetings recovered by back-fill",
+   "unit": "count",
+   "better": null,
+   "headline": false
+  }
+ },
+ "levels": {
+  "low": {
+   "num_requests": 240,
+   "dataset": {
+    "requests": 240,
+    "students_requesting": 96.3333,
+    "rush_share": 0.6999,
+    "urgent_share": 0.0719,
+    "priority_share": 0.1776,
+    "cancel_share": 0.0657,
+    "no_show_share": 0.0474,
+    "mean_duration_min": 17.1333,
+    "posted_availability_min": 11036.5,
+    "effective_availability_min": 7037.8333,
+    "offered_load": 0.5853
+   },
+   "table": {
+    "fcfs": {
+     "avg_wait_min": {
+      "mean": 245.7343,
+      "sd": 19.5862,
+      "ci95": 7.3128,
+      "n": 30
+     },
+     "median_wait_min": {
+      "mean": 202.1667,
+      "sd": 22.0201,
+      "ci95": 8.2215,
+      "n": 30
+     },
+     "p90_wait_min": {
+      "mean": 484.2433,
+      "sd": 55.19,
+      "ci95": 20.606,
+      "n": 30
+     },
+     "avg_wait_incl_unserved_min": {
+      "mean": 267.5573,
+      "sd": 23.8715,
+      "ci95": 8.9128,
+      "n": 30
+     },
+     "served_meetings": {
+      "mean": 160.5333,
+      "sd": 9.5907,
+      "ci95": 3.5808,
+      "n": 30
+     },
+     "success_rate": {
+      "mean": 0.6689,
+      "sd": 0.04,
+      "ci95": 0.0149,
+      "n": 30
+     },
+     "faculty_idle_min": {
+      "mean": 4340.1667,
+      "sd": 290.0639,
+      "ci95": 108.2995,
+      "n": 30
+     },
+     "utilization": {
+      "mean": 0.3837,
+      "sd": 0.0238,
+      "ci95": 0.0089,
+      "n": 30
+     },
+     "wasted_min": {
+      "mean": 317.0,
+      "sd": 77.3661,
+      "ci95": 28.8857,
+      "n": 30
+     },
+     "schedule_conflicts": {
+      "mean": 95.7333,
+      "sd": 7.6471,
+      "ci95": 2.8552,
+      "n": 30
+     },
+     "cancellations": {
+      "mean": 11.7667,
+      "sd": 3.4709,
+      "ci95": 1.2959,
+      "n": 30
+     },
+     "no_shows": {
+      "mean": 8.5333,
+      "sd": 2.8007,
+      "ci95": 1.0457,
+      "n": 30
+     },
+     "fairness_jain": {
+      "mean": 0.7544,
+      "sd": 0.04,
+      "ci95": 0.0149,
+      "n": 30
+     },
+     "fairness_wait_jain": {
+      "mean": 0.712,
+      "sd": 0.052,
+      "ci95": 0.0194,
+      "n": 30
+     },
+     "students_served": {
+      "mean": 78.5667,
+      "sd": 4.1163,
+      "ci95": 1.5369,
+      "n": 30
+     },
+     "urgent_success_rate": {
+      "mean": 0.4498,
+      "sd": 0.1098,
+      "ci95": 0.041,
+      "n": 30
+     },
+     "urgent_avg_wait_min": {
+      "mean": 152.267,
+      "sd": 34.689,
+      "ci95": 12.9516,
+      "n": 30
+     },
+     "peak_success_rate": {
+      "mean": 0.658,
+      "sd": 0.0483,
+      "ci95": 0.018,
+      "n": 30
+     },
+     "backfilled_meetings": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     }
+    },
+    "rule_based": {
+     "avg_wait_min": {
+      "mean": 214.903,
+      "sd": 20.6954,
+      "ci95": 7.7269,
+      "n": 30
+     },
+     "median_wait_min": {
+      "mean": 183.45,
+      "sd": 17.2683,
+      "ci95": 6.4474,
+      "n": 30
+     },
+     "p90_wait_min": {
+      "mean": 429.7467,
+      "sd": 52.5078,
+      "ci95": 19.6045,
+      "n": 30
+     },
+     "avg_wait_incl_unserved_min": {
+      "mean": 223.8763,
+      "sd": 23.1783,
+      "ci95": 8.6539,
+      "n": 30
+     },
+     "served_meetings": {
+      "mean": 173.8333,
+      "sd": 9.1504,
+      "ci95": 3.4164,
+      "n": 30
+     },
+     "success_rate": {
+      "mean": 0.7243,
+      "sd": 0.0381,
+      "ci95": 0.0142,
+      "n": 30
+     },
+     "faculty_idle_min": {
+      "mean": 4106.3333,
+      "sd": 307.9743,
+      "ci95": 114.9866,
+      "n": 30
+     },
+     "utilization": {
+      "mean": 0.417,
+      "sd": 0.0268,
+      "ci95": 0.01,
+      "n": 30
+     },
+     "wasted_min": {
+      "mean": 303.5,
+      "sd": 76.6446,
+      "ci95": 28.6164,
+      "n": 30
+     },
+     "schedule_conflicts": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     },
+     "cancellations": {
+      "mean": 13.2,
+      "sd": 3.9427,
+      "ci95": 1.4721,
+      "n": 30
+     },
+     "no_shows": {
+      "mean": 9.4,
+      "sd": 3.0354,
+      "ci95": 1.1333,
+      "n": 30
+     },
+     "fairness_jain": {
+      "mean": 0.7985,
+      "sd": 0.0341,
+      "ci95": 0.0127,
+      "n": 30
+     },
+     "fairness_wait_jain": {
+      "mean": 0.7386,
+      "sd": 0.036,
+      "ci95": 0.0135,
+      "n": 30
+     },
+     "students_served": {
+      "mean": 81.8667,
+      "sd": 3.8839,
+      "ci95": 1.4501,
+      "n": 30
+     },
+     "urgent_success_rate": {
+      "mean": 0.5441,
+      "sd": 0.1148,
+      "ci95": 0.0429,
+      "n": 30
+     },
+     "urgent_avg_wait_min": {
+      "mean": 151.8393,
+      "sd": 33.041,
+      "ci95": 12.3363,
+      "n": 30
+     },
+     "peak_success_rate": {
+      "mean": 0.7158,
+      "sd": 0.0439,
+      "ci95": 0.0164,
+      "n": 30
+     },
+     "backfilled_meetings": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     }
+    },
+    "intelligent": {
+     "avg_wait_min": {
+      "mean": 219.0793,
+      "sd": 21.6857,
+      "ci95": 8.0966,
+      "n": 30
+     },
+     "median_wait_min": {
+      "mean": 185.7833,
+      "sd": 18.0997,
+      "ci95": 6.7578,
+      "n": 30
+     },
+     "p90_wait_min": {
+      "mean": 435.9767,
+      "sd": 55.3882,
+      "ci95": 20.68,
+      "n": 30
+     },
+     "avg_wait_incl_unserved_min": {
+      "mean": 225.654,
+      "sd": 22.4689,
+      "ci95": 8.3891,
+      "n": 30
+     },
+     "served_meetings": {
+      "mean": 175.2,
+      "sd": 8.3021,
+      "ci95": 3.0997,
+      "n": 30
+     },
+     "success_rate": {
+      "mean": 0.73,
+      "sd": 0.0346,
+      "ci95": 0.0129,
+      "n": 30
+     },
+     "faculty_idle_min": {
+      "mean": 4082.0,
+      "sd": 302.2205,
+      "ci95": 112.8383,
+      "n": 30
+     },
+     "utilization": {
+      "mean": 0.4205,
+      "sd": 0.0255,
+      "ci95": 0.0095,
+      "n": 30
+     },
+     "wasted_min": {
+      "mean": 289.8333,
+      "sd": 80.3707,
+      "ci95": 30.0076,
+      "n": 30
+     },
+     "schedule_conflicts": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     },
+     "cancellations": {
+      "mean": 13.3667,
+      "sd": 3.9696,
+      "ci95": 1.4821,
+      "n": 30
+     },
+     "no_shows": {
+      "mean": 9.4333,
+      "sd": 3.025,
+      "ci95": 1.1294,
+      "n": 30
+     },
+     "fairness_jain": {
+      "mean": 0.8054,
+      "sd": 0.031,
+      "ci95": 0.0116,
+      "n": 30
+     },
+     "fairness_wait_jain": {
+      "mean": 0.7439,
+      "sd": 0.0364,
+      "ci95": 0.0136,
+      "n": 30
+     },
+     "students_served": {
+      "mean": 82.4667,
+      "sd": 3.6928,
+      "ci95": 1.3788,
+      "n": 30
+     },
+     "urgent_success_rate": {
+      "mean": 0.5731,
+      "sd": 0.1137,
+      "ci95": 0.0425,
+      "n": 30
+     },
+     "urgent_avg_wait_min": {
+      "mean": 160.581,
+      "sd": 34.7763,
+      "ci95": 12.9842,
+      "n": 30
+     },
+     "peak_success_rate": {
+      "mean": 0.7209,
+      "sd": 0.0403,
+      "ci95": 0.015,
+      "n": 30
+     },
+     "backfilled_meetings": {
+      "mean": 1.2333,
+      "sd": 1.3047,
+      "ci95": 0.4871,
+      "n": 30
+     }
+    }
+   },
+   "improvement": {
+    "intelligent_vs_fcfs": {
+     "avg_wait_min": {
+      "candidate_mean": 219.0793,
+      "baseline_mean": 245.7343,
+      "pct_improvement": 10.85,
+      "paired_diff_mean": 26.655,
+      "paired_diff_ci95": 6.2833,
+      "verdict": "better"
+     },
+     "median_wait_min": {
+      "candidate_mean": 185.7833,
+      "baseline_mean": 202.1667,
+      "pct_improvement": 8.1,
+      "paired_diff_mean": 16.3833,
+      "paired_diff_ci95": 6.3337,
+      "verdict": "better"
+     },
+     "p90_wait_min": {
+      "candidate_mean": 435.9767,
+      "baseline_mean": 484.2433,
+      "pct_improvement": 9.97,
+      "paired_diff_mean": 48.2667,
+      "paired_diff_ci95": 17.4954,
+      "verdict": "better"
+     },
+     "avg_wait_incl_unserved_min": {
+      "candidate_mean": 225.654,
+      "baseline_mean": 267.5573,
+      "pct_improvement": 15.66,
+      "paired_diff_mean": 41.9033,
+      "paired_diff_ci95": 4.6959,
+      "verdict": "better"
+     },
+     "served_meetings": {
+      "candidate_mean": 175.2,
+      "baseline_mean": 160.5333,
+      "pct_improvement": 9.14,
+      "paired_diff_mean": 14.6667,
+      "paired_diff_ci95": 1.4186,
+      "verdict": "better"
+     },
+     "success_rate": {
+      "candidate_mean": 0.73,
+      "baseline_mean": 0.6689,
+      "pct_improvement": 9.13,
+      "paired_diff_mean": 0.0611,
+      "paired_diff_ci95": 0.0059,
+      "verdict": "better"
+     },
+     "faculty_idle_min": {
+      "candidate_mean": 4082,
+      "baseline_mean": 4340.1667,
+      "pct_improvement": 5.95,
+      "paired_diff_mean": 258.1667,
+      "paired_diff_ci95": 25.4387,
+      "verdict": "better"
+     },
+     "utilization": {
+      "candidate_mean": 0.4205,
+      "baseline_mean": 0.3837,
+      "pct_improvement": 9.6,
+      "paired_diff_mean": 0.0368,
+      "paired_diff_ci95": 0.0039,
+      "verdict": "better"
+     },
+     "wasted_min": {
+      "candidate_mean": 289.8333,
+      "baseline_mean": 317,
+      "pct_improvement": 8.57,
+      "paired_diff_mean": 27.1667,
+      "paired_diff_ci95": 14.6066,
+      "verdict": "better"
+     },
+     "schedule_conflicts": {
+      "candidate_mean": 0,
+      "baseline_mean": 95.7333,
+      "pct_improvement": 100.0,
+      "paired_diff_mean": 95.7333,
+      "paired_diff_ci95": 2.8552,
+      "verdict": "better"
+     },
+     "cancellations": {
+      "candidate_mean": 13.3667,
+      "baseline_mean": 11.7667,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "no_shows": {
+      "candidate_mean": 9.4333,
+      "baseline_mean": 8.5333,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "fairness_jain": {
+      "candidate_mean": 0.8054,
+      "baseline_mean": 0.7544,
+      "pct_improvement": 6.76,
+      "paired_diff_mean": 0.051,
+      "paired_diff_ci95": 0.0073,
+      "verdict": "better"
+     },
+     "fairness_wait_jain": {
+      "candidate_mean": 0.7439,
+      "baseline_mean": 0.712,
+      "pct_improvement": 4.49,
+      "paired_diff_mean": 0.0319,
+      "paired_diff_ci95": 0.0138,
+      "verdict": "better"
+     },
+     "students_served": {
+      "candidate_mean": 82.4667,
+      "baseline_mean": 78.5667,
+      "pct_improvement": 4.96,
+      "paired_diff_mean": 3.9,
+      "paired_diff_ci95": 0.8106,
+      "verdict": "better"
+     },
+     "urgent_success_rate": {
+      "candidate_mean": 0.5731,
+      "baseline_mean": 0.4498,
+      "pct_improvement": 27.42,
+      "paired_diff_mean": 0.1233,
+      "paired_diff_ci95": 0.038,
+      "verdict": "better"
+     },
+     "urgent_avg_wait_min": {
+      "candidate_mean": 160.581,
+      "baseline_mean": 152.267,
+      "pct_improvement": -5.46,
+      "paired_diff_mean": -8.314,
+      "paired_diff_ci95": 13.6398,
+      "verdict": "no_clear_difference"
+     },
+     "peak_success_rate": {
+      "candidate_mean": 0.7209,
+      "baseline_mean": 0.658,
+      "pct_improvement": 9.56,
+      "paired_diff_mean": 0.0629,
+      "paired_diff_ci95": 0.0083,
+      "verdict": "better"
+     },
+     "backfilled_meetings": {
+      "candidate_mean": 1.2333,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "verdict": "informational"
+     }
+    },
+    "intelligent_vs_rule_based": {
+     "avg_wait_min": {
+      "candidate_mean": 219.0793,
+      "baseline_mean": 214.903,
+      "pct_improvement": -1.94,
+      "paired_diff_mean": -4.1763,
+      "paired_diff_ci95": 2.0324,
+      "verdict": "worse"
+     },
+     "median_wait_min": {
+      "candidate_mean": 185.7833,
+      "baseline_mean": 183.45,
+      "pct_improvement": -1.27,
+      "paired_diff_mean": -2.3333,
+      "paired_diff_ci95": 1.0146,
+      "verdict": "worse"
+     },
+     "p90_wait_min": {
+      "candidate_mean": 435.9767,
+      "baseline_mean": 429.7467,
+      "pct_improvement": -1.45,
+      "paired_diff_mean": -6.23,
+      "paired_diff_ci95": 5.4702,
+      "verdict": "worse"
+     },
+     "avg_wait_incl_unserved_min": {
+      "candidate_mean": 225.654,
+      "baseline_mean": 223.8763,
+      "pct_improvement": -0.79,
+      "paired_diff_mean": -1.7777,
+      "paired_diff_ci95": 1.6812,
+      "verdict": "worse"
+     },
+     "served_meetings": {
+      "candidate_mean": 175.2,
+      "baseline_mean": 173.8333,
+      "pct_improvement": 0.79,
+      "paired_diff_mean": 1.3667,
+      "paired_diff_ci95": 0.5841,
+      "verdict": "better"
+     },
+     "success_rate": {
+      "candidate_mean": 0.73,
+      "baseline_mean": 0.7243,
+      "pct_improvement": 0.79,
+      "paired_diff_mean": 0.0057,
+      "paired_diff_ci95": 0.0024,
+      "verdict": "better"
+     },
+     "faculty_idle_min": {
+      "candidate_mean": 4082,
+      "baseline_mean": 4106.3333,
+      "pct_improvement": 0.59,
+      "paired_diff_mean": 24.3333,
+      "paired_diff_ci95": 8.7936,
+      "verdict": "better"
+     },
+     "utilization": {
+      "candidate_mean": 0.4205,
+      "baseline_mean": 0.417,
+      "pct_improvement": 0.83,
+      "paired_diff_mean": 0.0035,
+      "paired_diff_ci95": 0.0013,
+      "verdict": "better"
+     },
+     "wasted_min": {
+      "candidate_mean": 289.8333,
+      "baseline_mean": 303.5,
+      "pct_improvement": 4.5,
+      "paired_diff_mean": 13.6667,
+      "paired_diff_ci95": 7.8277,
+      "verdict": "better"
+     },
+     "schedule_conflicts": {
+      "candidate_mean": 0,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "paired_diff_mean": 0.0,
+      "paired_diff_ci95": 0.0,
+      "verdict": "no_clear_difference"
+     },
+     "cancellations": {
+      "candidate_mean": 13.3667,
+      "baseline_mean": 13.2,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "no_shows": {
+      "candidate_mean": 9.4333,
+      "baseline_mean": 9.4,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "fairness_jain": {
+      "candidate_mean": 0.8054,
+      "baseline_mean": 0.7985,
+      "pct_improvement": 0.87,
+      "paired_diff_mean": 0.007,
+      "paired_diff_ci95": 0.0041,
+      "verdict": "better"
+     },
+     "fairness_wait_jain": {
+      "candidate_mean": 0.7439,
+      "baseline_mean": 0.7386,
+      "pct_improvement": 0.73,
+      "paired_diff_mean": 0.0054,
+      "paired_diff_ci95": 0.004,
+      "verdict": "better"
+     },
+     "students_served": {
+      "candidate_mean": 82.4667,
+      "baseline_mean": 81.8667,
+      "pct_improvement": 0.73,
+      "paired_diff_mean": 0.6,
+      "paired_diff_ci95": 0.4763,
+      "verdict": "better"
+     },
+     "urgent_success_rate": {
+      "candidate_mean": 0.5731,
+      "baseline_mean": 0.5441,
+      "pct_improvement": 5.32,
+      "paired_diff_mean": 0.029,
+      "paired_diff_ci95": 0.0186,
+      "verdict": "better"
+     },
+     "urgent_avg_wait_min": {
+      "candidate_mean": 160.581,
+      "baseline_mean": 151.8393,
+      "pct_improvement": -5.76,
+      "paired_diff_mean": -8.7417,
+      "paired_diff_ci95": 5.7722,
+      "verdict": "worse"
+     },
+     "peak_success_rate": {
+      "candidate_mean": 0.7209,
+      "baseline_mean": 0.7158,
+      "pct_improvement": 0.71,
+      "paired_diff_mean": 0.0051,
+      "paired_diff_ci95": 0.0026,
+      "verdict": "better"
+     },
+     "backfilled_meetings": {
+      "candidate_mean": 1.2333,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "verdict": "informational"
+     }
+    },
+    "rule_based_vs_fcfs": {
+     "avg_wait_min": {
+      "candidate_mean": 214.903,
+      "baseline_mean": 245.7343,
+      "pct_improvement": 12.55,
+      "paired_diff_mean": 30.8313,
+      "paired_diff_ci95": 6.0917,
+      "verdict": "better"
+     },
+     "median_wait_min": {
+      "candidate_mean": 183.45,
+      "baseline_mean": 202.1667,
+      "pct_improvement": 9.26,
+      "paired_diff_mean": 18.7167,
+      "paired_diff_ci95": 6.1236,
+      "verdict": "better"
+     },
+     "p90_wait_min": {
+      "candidate_mean": 429.7467,
+      "baseline_mean": 484.2433,
+      "pct_improvement": 11.25,
+      "paired_diff_mean": 54.4967,
+      "paired_diff_ci95": 16.3351,
+      "verdict": "better"
+     },
+     "avg_wait_incl_unserved_min": {
+      "candidate_mean": 223.8763,
+      "baseline_mean": 267.5573,
+      "pct_improvement": 16.33,
+      "paired_diff_mean": 43.681,
+      "paired_diff_ci95": 4.6543,
+      "verdict": "better"
+     },
+     "served_meetings": {
+      "candidate_mean": 173.8333,
+      "baseline_mean": 160.5333,
+      "pct_improvement": 8.28,
+      "paired_diff_mean": 13.3,
+      "paired_diff_ci95": 1.3306,
+      "verdict": "better"
+     },
+     "success_rate": {
+      "candidate_mean": 0.7243,
+      "baseline_mean": 0.6689,
+      "pct_improvement": 8.28,
+      "paired_diff_mean": 0.0554,
+      "paired_diff_ci95": 0.0055,
+      "verdict": "better"
+     },
+     "faculty_idle_min": {
+      "candidate_mean": 4106.3333,
+      "baseline_mean": 4340.1667,
+      "pct_improvement": 5.39,
+      "paired_diff_mean": 233.8333,
+      "paired_diff_ci95": 25.4963,
+      "verdict": "better"
+     },
+     "utilization": {
+      "candidate_mean": 0.417,
+      "baseline_mean": 0.3837,
+      "pct_improvement": 8.69,
+      "paired_diff_mean": 0.0334,
+      "paired_diff_ci95": 0.0038,
+      "verdict": "better"
+     },
+     "wasted_min": {
+      "candidate_mean": 303.5,
+      "baseline_mean": 317,
+      "pct_improvement": 4.26,
+      "paired_diff_mean": 13.5,
+      "paired_diff_ci95": 12.6153,
+      "verdict": "better"
+     },
+     "schedule_conflicts": {
+      "candidate_mean": 0,
+      "baseline_mean": 95.7333,
+      "pct_improvement": 100.0,
+      "paired_diff_mean": 95.7333,
+      "paired_diff_ci95": 2.8552,
+      "verdict": "better"
+     },
+     "cancellations": {
+      "candidate_mean": 13.2,
+      "baseline_mean": 11.7667,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "no_shows": {
+      "candidate_mean": 9.4,
+      "baseline_mean": 8.5333,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "fairness_jain": {
+      "candidate_mean": 0.7985,
+      "baseline_mean": 0.7544,
+      "pct_improvement": 5.83,
+      "paired_diff_mean": 0.044,
+      "paired_diff_ci95": 0.0066,
+      "verdict": "better"
+     },
+     "fairness_wait_jain": {
+      "candidate_mean": 0.7386,
+      "baseline_mean": 0.712,
+      "pct_improvement": 3.73,
+      "paired_diff_mean": 0.0266,
+      "paired_diff_ci95": 0.0136,
+      "verdict": "better"
+     },
+     "students_served": {
+      "candidate_mean": 81.8667,
+      "baseline_mean": 78.5667,
+      "pct_improvement": 4.2,
+      "paired_diff_mean": 3.3,
+      "paired_diff_ci95": 0.6515,
+      "verdict": "better"
+     },
+     "urgent_success_rate": {
+      "candidate_mean": 0.5441,
+      "baseline_mean": 0.4498,
+      "pct_improvement": 20.98,
+      "paired_diff_mean": 0.0944,
+      "paired_diff_ci95": 0.03,
+      "verdict": "better"
+     },
+     "urgent_avg_wait_min": {
+      "candidate_mean": 151.8393,
+      "baseline_mean": 152.267,
+      "pct_improvement": 0.28,
+      "paired_diff_mean": 0.4277,
+      "paired_diff_ci95": 11.332,
+      "verdict": "no_clear_difference"
+     },
+     "peak_success_rate": {
+      "candidate_mean": 0.7158,
+      "baseline_mean": 0.658,
+      "pct_improvement": 8.78,
+      "paired_diff_mean": 0.0578,
+      "paired_diff_ci95": 0.0076,
+      "verdict": "better"
+     },
+     "backfilled_meetings": {
+      "candidate_mean": 0,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "verdict": "informational"
+     }
+    }
+   },
+   "conclusions": [
+    "Waiting time: intelligent 219 min vs FCFS 246 min (10.8% lower, better) and vs rule-based 215 min (1.9% higher, worse).",
+    "Meetings held: 175 vs 161 (FCFS) and 174 (rule-based); success rate 73.0% vs 66.9% and 72.4%.",
+    "Faculty time: idle time 4082 min vs 4340 (FCFS) / 4106 (rule-based); schedule conflicts 0 vs 96 (FCFS) and 0 (rule-based).",
+    "Fairness (Jain): 0.805 vs 0.754 (FCFS) and 0.798 (rule-based); urgent requests held 57.3% vs 45.0% and 54.4%.",
+    "Weakest metric for the intelligent method: Average waiting time (-1.9% vs rule-based, worse). Most of the gain over FCFS comes from respecting the class timetable and flexible meeting lengths (already present in rule-based); the scoring layer adds smaller gains. Data are synthetic."
+   ],
+   "weakest_metric": {
+    "metric": "avg_wait_min",
+    "pct_improvement": -1.94,
+    "verdict": "worse"
+   }
+  },
+  "medium": {
+   "num_requests": 360,
+   "dataset": {
+    "requests": 360,
+    "students_requesting": 112.1667,
+    "rush_share": 0.6994,
+    "urgent_share": 0.0707,
+    "priority_share": 0.1789,
+    "cancel_share": 0.0683,
+    "no_show_share": 0.0469,
+    "mean_duration_min": 17.2153,
+    "posted_availability_min": 11036.5,
+    "effective_availability_min": 7037.8333,
+    "offered_load": 0.882
+   },
+   "table": {
+    "fcfs": {
+     "avg_wait_min": {
+      "mean": 299.1653,
+      "sd": 24.4599,
+      "ci95": 9.1325,
+      "n": 30
+     },
+     "median_wait_min": {
+      "mean": 243.4667,
+      "sd": 27.5355,
+      "ci95": 10.2808,
+      "n": 30
+     },
+     "p90_wait_min": {
+      "mean": 603.9533,
+      "sd": 51.2267,
+      "ci95": 19.1262,
+      "n": 30
+     },
+     "avg_wait_incl_unserved_min": {
+      "mean": 339.117,
+      "sd": 22.8532,
+      "ci95": 8.5326,
+      "n": 30
+     },
+     "served_meetings": {
+      "mean": 204.6667,
+      "sd": 9.5641,
+      "ci95": 3.5709,
+      "n": 30
+     },
+     "success_rate": {
+      "mean": 0.5685,
+      "sd": 0.0266,
+      "ci95": 0.0099,
+      "n": 30
+     },
+     "faculty_idle_min": {
+      "mean": 3598.0,
+      "sd": 293.4386,
+      "ci95": 109.5595,
+      "n": 30
+     },
+     "utilization": {
+      "mean": 0.4893,
+      "sd": 0.0269,
+      "ci95": 0.01,
+      "n": 30
+     },
+     "wasted_min": {
+      "mean": 369.0,
+      "sd": 80.7871,
+      "ci95": 30.163,
+      "n": 30
+     },
+     "schedule_conflicts": {
+      "mean": 134.8,
+      "sd": 10.3037,
+      "ci95": 3.847,
+      "n": 30
+     },
+     "cancellations": {
+      "mean": 16.0667,
+      "sd": 3.3107,
+      "ci95": 1.2361,
+      "n": 30
+     },
+     "no_shows": {
+      "mean": 10.1333,
+      "sd": 2.8616,
+      "ci95": 1.0684,
+      "n": 30
+     },
+     "fairness_jain": {
+      "mean": 0.6969,
+      "sd": 0.0281,
+      "ci95": 0.0105,
+      "n": 30
+     },
+     "fairness_wait_jain": {
+      "mean": 0.7335,
+      "sd": 0.047,
+      "ci95": 0.0176,
+      "n": 30
+     },
+     "students_served": {
+      "mean": 87.8,
+      "sd": 4.2133,
+      "ci95": 1.5731,
+      "n": 30
+     },
+     "urgent_success_rate": {
+      "mean": 0.3145,
+      "sd": 0.1009,
+      "ci95": 0.0377,
+      "n": 30
+     },
+     "urgent_avg_wait_min": {
+      "mean": 158.57,
+      "sd": 38.1463,
+      "ci95": 14.2425,
+      "n": 30
+     },
+     "peak_success_rate": {
+      "mean": 0.5614,
+      "sd": 0.0347,
+      "ci95": 0.013,
+      "n": 30
+     },
+     "backfilled_meetings": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     }
+    },
+    "rule_based": {
+     "avg_wait_min": {
+      "mean": 270.2863,
+      "sd": 23.8864,
+      "ci95": 8.9183,
+      "n": 30
+     },
+     "median_wait_min": {
+      "mean": 218.6333,
+      "sd": 26.4402,
+      "ci95": 9.8718,
+      "n": 30
+     },
+     "p90_wait_min": {
+      "mean": 555.7233,
+      "sd": 70.0022,
+      "ci95": 26.1363,
+      "n": 30
+     },
+     "avg_wait_incl_unserved_min": {
+      "mean": 289.768,
+      "sd": 22.3341,
+      "ci95": 8.3388,
+      "n": 30
+     },
+     "served_meetings": {
+      "mean": 230.7333,
+      "sd": 9.6345,
+      "ci95": 3.5972,
+      "n": 30
+     },
+     "success_rate": {
+      "mean": 0.6409,
+      "sd": 0.0268,
+      "ci95": 0.01,
+      "n": 30
+     },
+     "faculty_idle_min": {
+      "mean": 3159.1667,
+      "sd": 317.7102,
+      "ci95": 118.6216,
+      "n": 30
+     },
+     "utilization": {
+      "mean": 0.5519,
+      "sd": 0.031,
+      "ci95": 0.0116,
+      "n": 30
+     },
+     "wasted_min": {
+      "mean": 375.0,
+      "sd": 76.8339,
+      "ci95": 28.687,
+      "n": 30
+     },
+     "schedule_conflicts": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     },
+     "cancellations": {
+      "mean": 18.2333,
+      "sd": 3.6359,
+      "ci95": 1.3575,
+      "n": 30
+     },
+     "no_shows": {
+      "mean": 11.8667,
+      "sd": 3.1265,
+      "ci95": 1.1673,
+      "n": 30
+     },
+     "fairness_jain": {
+      "mean": 0.753,
+      "sd": 0.0235,
+      "ci95": 0.0088,
+      "n": 30
+     },
+     "fairness_wait_jain": {
+      "mean": 0.747,
+      "sd": 0.0427,
+      "ci95": 0.016,
+      "n": 30
+     },
+     "students_served": {
+      "mean": 92.9667,
+      "sd": 4.3903,
+      "ci95": 1.6392,
+      "n": 30
+     },
+     "urgent_success_rate": {
+      "mean": 0.4139,
+      "sd": 0.1097,
+      "ci95": 0.041,
+      "n": 30
+     },
+     "urgent_avg_wait_min": {
+      "mean": 156.4313,
+      "sd": 31.334,
+      "ci95": 11.699,
+      "n": 30
+     },
+     "peak_success_rate": {
+      "mean": 0.6348,
+      "sd": 0.0326,
+      "ci95": 0.0122,
+      "n": 30
+     },
+     "backfilled_meetings": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     }
+    },
+    "intelligent": {
+     "avg_wait_min": {
+      "mean": 275.215,
+      "sd": 23.0467,
+      "ci95": 8.6048,
+      "n": 30
+     },
+     "median_wait_min": {
+      "mean": 221.4333,
+      "sd": 25.8843,
+      "ci95": 9.6643,
+      "n": 30
+     },
+     "p90_wait_min": {
+      "mean": 565.6933,
+      "sd": 64.0411,
+      "ci95": 23.9107,
+      "n": 30
+     },
+     "avg_wait_incl_unserved_min": {
+      "mean": 291.5907,
+      "sd": 21.5478,
+      "ci95": 8.0452,
+      "n": 30
+     },
+     "served_meetings": {
+      "mean": 234.1333,
+      "sd": 9.0506,
+      "ci95": 3.3792,
+      "n": 30
+     },
+     "success_rate": {
+      "mean": 0.6504,
+      "sd": 0.0251,
+      "ci95": 0.0094,
+      "n": 30
+     },
+     "faculty_idle_min": {
+      "mean": 3106.8333,
+      "sd": 312.2153,
+      "ci95": 116.57,
+      "n": 30
+     },
+     "utilization": {
+      "mean": 0.5593,
+      "sd": 0.0301,
+      "ci95": 0.0112,
+      "n": 30
+     },
+     "wasted_min": {
+      "mean": 331.6667,
+      "sd": 79.8526,
+      "ci95": 29.8141,
+      "n": 30
+     },
+     "schedule_conflicts": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     },
+     "cancellations": {
+      "mean": 18.4,
+      "sd": 3.6916,
+      "ci95": 1.3783,
+      "n": 30
+     },
+     "no_shows": {
+      "mean": 11.9667,
+      "sd": 3.5862,
+      "ci95": 1.339,
+      "n": 30
+     },
+     "fairness_jain": {
+      "mean": 0.7622,
+      "sd": 0.0243,
+      "ci95": 0.0091,
+      "n": 30
+     },
+     "fairness_wait_jain": {
+      "mean": 0.7485,
+      "sd": 0.0467,
+      "ci95": 0.0174,
+      "n": 30
+     },
+     "students_served": {
+      "mean": 93.7667,
+      "sd": 4.3445,
+      "ci95": 1.6221,
+      "n": 30
+     },
+     "urgent_success_rate": {
+      "mean": 0.4631,
+      "sd": 0.1014,
+      "ci95": 0.0379,
+      "n": 30
+     },
+     "urgent_avg_wait_min": {
+      "mean": 169.9737,
+      "sd": 35.0076,
+      "ci95": 13.0706,
+      "n": 30
+     },
+     "peak_success_rate": {
+      "mean": 0.6434,
+      "sd": 0.031,
+      "ci95": 0.0116,
+      "n": 30
+     },
+     "backfilled_meetings": {
+      "mean": 4.3333,
+      "sd": 1.6046,
+      "ci95": 0.5991,
+      "n": 30
+     }
+    }
+   },
+   "improvement": {
+    "intelligent_vs_fcfs": {
+     "avg_wait_min": {
+      "candidate_mean": 275.215,
+      "baseline_mean": 299.1653,
+      "pct_improvement": 8.01,
+      "paired_diff_mean": 23.9503,
+      "paired_diff_ci95": 5.684,
+      "verdict": "better"
+     },
+     "median_wait_min": {
+      "candidate_mean": 221.4333,
+      "baseline_mean": 243.4667,
+      "pct_improvement": 9.05,
+      "paired_diff_mean": 22.0333,
+      "paired_diff_ci95": 6.5976,
+      "verdict": "better"
+     },
+     "p90_wait_min": {
+      "candidate_mean": 565.6933,
+      "baseline_mean": 603.9533,
+      "pct_improvement": 6.33,
+      "paired_diff_mean": 38.26,
+      "paired_diff_ci95": 19.1567,
+      "verdict": "better"
+     },
+     "avg_wait_incl_unserved_min": {
+      "candidate_mean": 291.5907,
+      "baseline_mean": 339.117,
+      "pct_improvement": 14.01,
+      "paired_diff_mean": 47.5263,
+      "paired_diff_ci95": 4.4507,
+      "verdict": "better"
+     },
+     "served_meetings": {
+      "candidate_mean": 234.1333,
+      "baseline_mean": 204.6667,
+      "pct_improvement": 14.4,
+      "paired_diff_mean": 29.4667,
+      "paired_diff_ci95": 2.369,
+      "verdict": "better"
+     },
+     "success_rate": {
+      "candidate_mean": 0.6504,
+      "baseline_mean": 0.5685,
+      "pct_improvement": 14.4,
+      "paired_diff_mean": 0.0819,
+      "paired_diff_ci95": 0.0066,
+      "verdict": "better"
+     },
+     "faculty_idle_min": {
+      "candidate_mean": 3106.8333,
+      "baseline_mean": 3598,
+      "pct_improvement": 13.65,
+      "paired_diff_mean": 491.1667,
+      "paired_diff_ci95": 43.2997,
+      "verdict": "better"
+     },
+     "utilization": {
+      "candidate_mean": 0.5593,
+      "baseline_mean": 0.4893,
+      "pct_improvement": 14.32,
+      "paired_diff_mean": 0.0701,
+      "paired_diff_ci95": 0.0066,
+      "verdict": "better"
+     },
+     "wasted_min": {
+      "candidate_mean": 331.6667,
+      "baseline_mean": 369,
+      "pct_improvement": 10.12,
+      "paired_diff_mean": 37.3333,
+      "paired_diff_ci95": 19.9788,
+      "verdict": "better"
+     },
+     "schedule_conflicts": {
+      "candidate_mean": 0,
+      "baseline_mean": 134.8,
+      "pct_improvement": 100.0,
+      "paired_diff_mean": 134.8,
+      "paired_diff_ci95": 3.847,
+      "verdict": "better"
+     },
+     "cancellations": {
+      "candidate_mean": 18.4,
+      "baseline_mean": 16.0667,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "no_shows": {
+      "candidate_mean": 11.9667,
+      "baseline_mean": 10.1333,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "fairness_jain": {
+      "candidate_mean": 0.7622,
+      "baseline_mean": 0.6969,
+      "pct_improvement": 9.37,
+      "paired_diff_mean": 0.0653,
+      "paired_diff_ci95": 0.0076,
+      "verdict": "better"
+     },
+     "fairness_wait_jain": {
+      "candidate_mean": 0.7485,
+      "baseline_mean": 0.7335,
+      "pct_improvement": 2.04,
+      "paired_diff_mean": 0.015,
+      "paired_diff_ci95": 0.0129,
+      "verdict": "better"
+     },
+     "students_served": {
+      "candidate_mean": 93.7667,
+      "baseline_mean": 87.8,
+      "pct_improvement": 6.8,
+      "paired_diff_mean": 5.9667,
+      "paired_diff_ci95": 0.8575,
+      "verdict": "better"
+     },
+     "urgent_success_rate": {
+      "candidate_mean": 0.4631,
+      "baseline_mean": 0.3145,
+      "pct_improvement": 47.24,
+      "paired_diff_mean": 0.1486,
+      "paired_diff_ci95": 0.0299,
+      "verdict": "better"
+     },
+     "urgent_avg_wait_min": {
+      "candidate_mean": 169.9737,
+      "baseline_mean": 158.57,
+      "pct_improvement": -7.19,
+      "paired_diff_mean": -11.4037,
+      "paired_diff_ci95": 13.1108,
+      "verdict": "no_clear_difference"
+     },
+     "peak_success_rate": {
+      "candidate_mean": 0.6434,
+      "baseline_mean": 0.5614,
+      "pct_improvement": 14.62,
+      "paired_diff_mean": 0.0821,
+      "paired_diff_ci95": 0.0087,
+      "verdict": "better"
+     },
+     "backfilled_meetings": {
+      "candidate_mean": 4.3333,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "verdict": "informational"
+     }
+    },
+    "intelligent_vs_rule_based": {
+     "avg_wait_min": {
+      "candidate_mean": 275.215,
+      "baseline_mean": 270.2863,
+      "pct_improvement": -1.82,
+      "paired_diff_mean": -4.9287,
+      "paired_diff_ci95": 1.9579,
+      "verdict": "worse"
+     },
+     "median_wait_min": {
+      "candidate_mean": 221.4333,
+      "baseline_mean": 218.6333,
+      "pct_improvement": -1.28,
+      "paired_diff_mean": -2.8,
+      "paired_diff_ci95": 2.0895,
+      "verdict": "worse"
+     },
+     "p90_wait_min": {
+      "candidate_mean": 565.6933,
+      "baseline_mean": 555.7233,
+      "pct_improvement": -1.79,
+      "paired_diff_mean": -9.97,
+      "paired_diff_ci95": 7.212,
+      "verdict": "worse"
+     },
+     "avg_wait_incl_unserved_min": {
+      "candidate_mean": 291.5907,
+      "baseline_mean": 289.768,
+      "pct_improvement": -0.63,
+      "paired_diff_mean": -1.8227,
+      "paired_diff_ci95": 1.5883,
+      "verdict": "worse"
+     },
+     "served_meetings": {
+      "candidate_mean": 234.1333,
+      "baseline_mean": 230.7333,
+      "pct_improvement": 1.47,
+      "paired_diff_mean": 3.4,
+      "paired_diff_ci95": 0.818,
+      "verdict": "better"
+     },
+     "success_rate": {
+      "candidate_mean": 0.6504,
+      "baseline_mean": 0.6409,
+      "pct_improvement": 1.47,
+      "paired_diff_mean": 0.0095,
+      "paired_diff_ci95": 0.0023,
+      "verdict": "better"
+     },
+     "faculty_idle_min": {
+      "candidate_mean": 3106.8333,
+      "baseline_mean": 3159.1667,
+      "pct_improvement": 1.66,
+      "paired_diff_mean": 52.3333,
+      "paired_diff_ci95": 11.8448,
+      "verdict": "better"
+     },
+     "utilization": {
+      "candidate_mean": 0.5593,
+      "baseline_mean": 0.5519,
+      "pct_improvement": 1.35,
+      "paired_diff_mean": 0.0075,
+      "paired_diff_ci95": 0.0017,
+      "verdict": "better"
+     },
+     "wasted_min": {
+      "candidate_mean": 331.6667,
+      "baseline_mean": 375,
+      "pct_improvement": 11.56,
+      "paired_diff_mean": 43.3333,
+      "paired_diff_ci95": 10.4037,
+      "verdict": "better"
+     },
+     "schedule_conflicts": {
+      "candidate_mean": 0,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "paired_diff_mean": 0.0,
+      "paired_diff_ci95": 0.0,
+      "verdict": "no_clear_difference"
+     },
+     "cancellations": {
+      "candidate_mean": 18.4,
+      "baseline_mean": 18.2333,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "no_shows": {
+      "candidate_mean": 11.9667,
+      "baseline_mean": 11.8667,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "fairness_jain": {
+      "candidate_mean": 0.7622,
+      "baseline_mean": 0.753,
+      "pct_improvement": 1.23,
+      "paired_diff_mean": 0.0092,
+      "paired_diff_ci95": 0.0031,
+      "verdict": "better"
+     },
+     "fairness_wait_jain": {
+      "candidate_mean": 0.7485,
+      "baseline_mean": 0.747,
+      "pct_improvement": 0.2,
+      "paired_diff_mean": 0.0015,
+      "paired_diff_ci95": 0.0061,
+      "verdict": "no_clear_difference"
+     },
+     "students_served": {
+      "candidate_mean": 93.7667,
+      "baseline_mean": 92.9667,
+      "pct_improvement": 0.86,
+      "paired_diff_mean": 0.8,
+      "paired_diff_ci95": 0.4319,
+      "verdict": "better"
+     },
+     "urgent_success_rate": {
+      "candidate_mean": 0.4631,
+      "baseline_mean": 0.4139,
+      "pct_improvement": 11.91,
+      "paired_diff_mean": 0.0493,
+      "paired_diff_ci95": 0.0236,
+      "verdict": "better"
+     },
+     "urgent_avg_wait_min": {
+      "candidate_mean": 169.9737,
+      "baseline_mean": 156.4313,
+      "pct_improvement": -8.66,
+      "paired_diff_mean": -13.5423,
+      "paired_diff_ci95": 7.9551,
+      "verdict": "worse"
+     },
+     "peak_success_rate": {
+      "candidate_mean": 0.6434,
+      "baseline_mean": 0.6348,
+      "pct_improvement": 1.36,
+      "paired_diff_mean": 0.0087,
+      "paired_diff_ci95": 0.0037,
+      "verdict": "better"
+     },
+     "backfilled_meetings": {
+      "candidate_mean": 4.3333,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "verdict": "informational"
+     }
+    },
+    "rule_based_vs_fcfs": {
+     "avg_wait_min": {
+      "candidate_mean": 270.2863,
+      "baseline_mean": 299.1653,
+      "pct_improvement": 9.65,
+      "paired_diff_mean": 28.879,
+      "paired_diff_ci95": 5.8677,
+      "verdict": "better"
+     },
+     "median_wait_min": {
+      "candidate_mean": 218.6333,
+      "baseline_mean": 243.4667,
+      "pct_improvement": 10.2,
+      "paired_diff_mean": 24.8333,
+      "paired_diff_ci95": 7.1795,
+      "verdict": "better"
+     },
+     "p90_wait_min": {
+      "candidate_mean": 555.7233,
+      "baseline_mean": 603.9533,
+      "pct_improvement": 7.99,
+      "paired_diff_mean": 48.23,
+      "paired_diff_ci95": 20.3986,
+      "verdict": "better"
+     },
+     "avg_wait_incl_unserved_min": {
+      "candidate_mean": 289.768,
+      "baseline_mean": 339.117,
+      "pct_improvement": 14.55,
+      "paired_diff_mean": 49.349,
+      "paired_diff_ci95": 4.4292,
+      "verdict": "better"
+     },
+     "served_meetings": {
+      "candidate_mean": 230.7333,
+      "baseline_mean": 204.6667,
+      "pct_improvement": 12.74,
+      "paired_diff_mean": 26.0667,
+      "paired_diff_ci95": 2.3284,
+      "verdict": "better"
+     },
+     "success_rate": {
+      "candidate_mean": 0.6409,
+      "baseline_mean": 0.5685,
+      "pct_improvement": 12.74,
+      "paired_diff_mean": 0.0724,
+      "paired_diff_ci95": 0.0065,
+      "verdict": "better"
+     },
+     "faculty_idle_min": {
+      "candidate_mean": 3159.1667,
+      "baseline_mean": 3598,
+      "pct_improvement": 12.2,
+      "paired_diff_mean": 438.8333,
+      "paired_diff_ci95": 43.5101,
+      "verdict": "better"
+     },
+     "utilization": {
+      "candidate_mean": 0.5519,
+      "baseline_mean": 0.4893,
+      "pct_improvement": 12.8,
+      "paired_diff_mean": 0.0626,
+      "paired_diff_ci95": 0.0066,
+      "verdict": "better"
+     },
+     "wasted_min": {
+      "candidate_mean": 375,
+      "baseline_mean": 369,
+      "pct_improvement": -1.63,
+      "paired_diff_mean": -6.0,
+      "paired_diff_ci95": 21.2986,
+      "verdict": "no_clear_difference"
+     },
+     "schedule_conflicts": {
+      "candidate_mean": 0,
+      "baseline_mean": 134.8,
+      "pct_improvement": 100.0,
+      "paired_diff_mean": 134.8,
+      "paired_diff_ci95": 3.847,
+      "verdict": "better"
+     },
+     "cancellations": {
+      "candidate_mean": 18.2333,
+      "baseline_mean": 16.0667,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "no_shows": {
+      "candidate_mean": 11.8667,
+      "baseline_mean": 10.1333,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "fairness_jain": {
+      "candidate_mean": 0.753,
+      "baseline_mean": 0.6969,
+      "pct_improvement": 8.04,
+      "paired_diff_mean": 0.0561,
+      "paired_diff_ci95": 0.0073,
+      "verdict": "better"
+     },
+     "fairness_wait_jain": {
+      "candidate_mean": 0.747,
+      "baseline_mean": 0.7335,
+      "pct_improvement": 1.84,
+      "paired_diff_mean": 0.0135,
+      "paired_diff_ci95": 0.0116,
+      "verdict": "better"
+     },
+     "students_served": {
+      "candidate_mean": 92.9667,
+      "baseline_mean": 87.8,
+      "pct_improvement": 5.88,
+      "paired_diff_mean": 5.1667,
+      "paired_diff_ci95": 0.815,
+      "verdict": "better"
+     },
+     "urgent_success_rate": {
+      "candidate_mean": 0.4139,
+      "baseline_mean": 0.3145,
+      "pct_improvement": 31.58,
+      "paired_diff_mean": 0.0993,
+      "paired_diff_ci95": 0.0247,
+      "verdict": "better"
+     },
+     "urgent_avg_wait_min": {
+      "candidate_mean": 156.4313,
+      "baseline_mean": 158.57,
+      "pct_improvement": 1.35,
+      "paired_diff_mean": 2.1387,
+      "paired_diff_ci95": 11.7892,
+      "verdict": "no_clear_difference"
+     },
+     "peak_success_rate": {
+      "candidate_mean": 0.6348,
+      "baseline_mean": 0.5614,
+      "pct_improvement": 13.08,
+      "paired_diff_mean": 0.0734,
+      "paired_diff_ci95": 0.0086,
+      "verdict": "better"
+     },
+     "backfilled_meetings": {
+      "candidate_mean": 0,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "verdict": "informational"
+     }
+    }
+   },
+   "conclusions": [
+    "Waiting time: intelligent 275 min vs FCFS 299 min (8.0% lower, better) and vs rule-based 270 min (1.8% higher, worse).",
+    "Meetings held: 234 vs 205 (FCFS) and 231 (rule-based); success rate 65.0% vs 56.9% and 64.1%.",
+    "Faculty time: idle time 3107 min vs 3598 (FCFS) / 3159 (rule-based); schedule conflicts 0 vs 135 (FCFS) and 0 (rule-based).",
+    "Fairness (Jain): 0.762 vs 0.697 (FCFS) and 0.753 (rule-based); urgent requests held 46.3% vs 31.4% and 41.4%.",
+    "Weakest metric for the intelligent method: Average waiting time (-1.8% vs rule-based, worse). Most of the gain over FCFS comes from respecting the class timetable and flexible meeting lengths (already present in rule-based); the scoring layer adds smaller gains. Data are synthetic."
+   ],
+   "weakest_metric": {
+    "metric": "avg_wait_min",
+    "pct_improvement": -1.82,
+    "verdict": "worse"
+   }
+  },
+  "high": {
+   "num_requests": 480,
+   "dataset": {
+    "requests": 480,
+    "students_requesting": 122,
+    "rush_share": 0.7019,
+    "urgent_share": 0.0715,
+    "priority_share": 0.1775,
+    "cancel_share": 0.0697,
+    "no_show_share": 0.0479,
+    "mean_duration_min": 17.197,
+    "posted_availability_min": 11036.5,
+    "effective_availability_min": 7037.8333,
+    "offered_load": 1.1749
+   },
+   "table": {
+    "fcfs": {
+     "avg_wait_min": {
+      "mean": 351.4747,
+      "sd": 25.4442,
+      "ci95": 9.4999,
+      "n": 30
+     },
+     "median_wait_min": {
+      "mean": 303.5167,
+      "sd": 39.2656,
+      "ci95": 14.6604,
+      "n": 30
+     },
+     "p90_wait_min": {
+      "mean": 695.1933,
+      "sd": 57.5145,
+      "ci95": 21.4738,
+      "n": 30
+     },
+     "avg_wait_incl_unserved_min": {
+      "mean": 395.778,
+      "sd": 22.8449,
+      "ci95": 8.5295,
+      "n": 30
+     },
+     "served_meetings": {
+      "mean": 233.2333,
+      "sd": 11.566,
+      "ci95": 4.3183,
+      "n": 30
+     },
+     "success_rate": {
+      "mean": 0.4859,
+      "sd": 0.0241,
+      "ci95": 0.009,
+      "n": 30
+     },
+     "faculty_idle_min": {
+      "mean": 3141.1667,
+      "sd": 283.4872,
+      "ci95": 105.844,
+      "n": 30
+     },
+     "utilization": {
+      "mean": 0.5542,
+      "sd": 0.0277,
+      "ci95": 0.0103,
+      "n": 30
+     },
+     "wasted_min": {
+      "mean": 417.0,
+      "sd": 96.5223,
+      "ci95": 36.038,
+      "n": 30
+     },
+     "schedule_conflicts": {
+      "mean": 165.7667,
+      "sd": 11.425,
+      "ci95": 4.2657,
+      "n": 30
+     },
+     "cancellations": {
+      "mean": 18.3333,
+      "sd": 3.9856,
+      "ci95": 1.4881,
+      "n": 30
+     },
+     "no_shows": {
+      "mean": 12.2333,
+      "sd": 3.5398,
+      "ci95": 1.3216,
+      "n": 30
+     },
+     "fairness_jain": {
+      "mean": 0.6579,
+      "sd": 0.0323,
+      "ci95": 0.012,
+      "n": 30
+     },
+     "fairness_wait_jain": {
+      "mean": 0.7718,
+      "sd": 0.0318,
+      "ci95": 0.0119,
+      "n": 30
+     },
+     "students_served": {
+      "mean": 93.9333,
+      "sd": 4.9684,
+      "ci95": 1.855,
+      "n": 30
+     },
+     "urgent_success_rate": {
+      "mean": 0.2213,
+      "sd": 0.0763,
+      "ci95": 0.0285,
+      "n": 30
+     },
+     "urgent_avg_wait_min": {
+      "mean": 181.7597,
+      "sd": 35.11,
+      "ci95": 13.1088,
+      "n": 30
+     },
+     "peak_success_rate": {
+      "mean": 0.4783,
+      "sd": 0.0292,
+      "ci95": 0.0109,
+      "n": 30
+     },
+     "backfilled_meetings": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     }
+    },
+    "rule_based": {
+     "avg_wait_min": {
+      "mean": 316.86,
+      "sd": 27.3375,
+      "ci95": 10.2068,
+      "n": 30
+     },
+     "median_wait_min": {
+      "mean": 257.1667,
+      "sd": 34.1019,
+      "ci95": 12.7324,
+      "n": 30
+     },
+     "p90_wait_min": {
+      "mean": 644.0133,
+      "sd": 59.5521,
+      "ci95": 22.2346,
+      "n": 30
+     },
+     "avg_wait_incl_unserved_min": {
+      "mean": 342.596,
+      "sd": 22.0229,
+      "ci95": 8.2225,
+      "n": 30
+     },
+     "served_meetings": {
+      "mean": 272.2,
+      "sd": 11.5203,
+      "ci95": 4.3013,
+      "n": 30
+     },
+     "success_rate": {
+      "mean": 0.5671,
+      "sd": 0.024,
+      "ci95": 0.009,
+      "n": 30
+     },
+     "faculty_idle_min": {
+      "mean": 2489.3333,
+      "sd": 312.2851,
+      "ci95": 116.5961,
+      "n": 30
+     },
+     "utilization": {
+      "mean": 0.6471,
+      "sd": 0.0331,
+      "ci95": 0.0123,
+      "n": 30
+     },
+     "wasted_min": {
+      "mean": 440.6667,
+      "sd": 92.6128,
+      "ci95": 34.5783,
+      "n": 30
+     },
+     "schedule_conflicts": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     },
+     "cancellations": {
+      "mean": 21.9667,
+      "sd": 4.4836,
+      "ci95": 1.674,
+      "n": 30
+     },
+     "no_shows": {
+      "mean": 14.3,
+      "sd": 3.5926,
+      "ci95": 1.3414,
+      "n": 30
+     },
+     "fairness_jain": {
+      "mean": 0.7244,
+      "sd": 0.0274,
+      "ci95": 0.0102,
+      "n": 30
+     },
+     "fairness_wait_jain": {
+      "mean": 0.7664,
+      "sd": 0.0333,
+      "ci95": 0.0125,
+      "n": 30
+     },
+     "students_served": {
+      "mean": 100.2667,
+      "sd": 5.1924,
+      "ci95": 1.9387,
+      "n": 30
+     },
+     "urgent_success_rate": {
+      "mean": 0.3179,
+      "sd": 0.0983,
+      "ci95": 0.0367,
+      "n": 30
+     },
+     "urgent_avg_wait_min": {
+      "mean": 171.287,
+      "sd": 32.1561,
+      "ci95": 12.006,
+      "n": 30
+     },
+     "peak_success_rate": {
+      "mean": 0.5595,
+      "sd": 0.0317,
+      "ci95": 0.0118,
+      "n": 30
+     },
+     "backfilled_meetings": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     }
+    },
+    "intelligent": {
+     "avg_wait_min": {
+      "mean": 322.3173,
+      "sd": 26.0349,
+      "ci95": 9.7205,
+      "n": 30
+     },
+     "median_wait_min": {
+      "mean": 262.1,
+      "sd": 32.4192,
+      "ci95": 12.1042,
+      "n": 30
+     },
+     "p90_wait_min": {
+      "mean": 651.2567,
+      "sd": 56.3719,
+      "ci95": 21.0473,
+      "n": 30
+     },
+     "avg_wait_incl_unserved_min": {
+      "mean": 344.5973,
+      "sd": 20.8581,
+      "ci95": 7.7877,
+      "n": 30
+     },
+     "served_meetings": {
+      "mean": 278.2667,
+      "sd": 10.5958,
+      "ci95": 3.9561,
+      "n": 30
+     },
+     "success_rate": {
+      "mean": 0.5797,
+      "sd": 0.0221,
+      "ci95": 0.0082,
+      "n": 30
+     },
+     "faculty_idle_min": {
+      "mean": 2404.8333,
+      "sd": 304.703,
+      "ci95": 113.7652,
+      "n": 30
+     },
+     "utilization": {
+      "mean": 0.6592,
+      "sd": 0.0319,
+      "ci95": 0.0119,
+      "n": 30
+     },
+     "wasted_min": {
+      "mean": 368.8333,
+      "sd": 96.0216,
+      "ci95": 35.851,
+      "n": 30
+     },
+     "schedule_conflicts": {
+      "mean": 0.0,
+      "sd": 0.0,
+      "ci95": 0.0,
+      "n": 30
+     },
+     "cancellations": {
+      "mean": 22.3,
+      "sd": 4.8434,
+      "ci95": 1.8084,
+      "n": 30
+     },
+     "no_shows": {
+      "mean": 14.1,
+      "sd": 3.9771,
+      "ci95": 1.4849,
+      "n": 30
+     },
+     "fairness_jain": {
+      "mean": 0.7363,
+      "sd": 0.0247,
+      "ci95": 0.0092,
+      "n": 30
+     },
+     "fairness_wait_jain": {
+      "mean": 0.7713,
+      "sd": 0.0372,
+      "ci95": 0.0139,
+      "n": 30
+     },
+     "students_served": {
+      "mean": 101.3,
+      "sd": 5.0661,
+      "ci95": 1.8915,
+      "n": 30
+     },
+     "urgent_success_rate": {
+      "mean": 0.3749,
+      "sd": 0.0957,
+      "ci95": 0.0357,
+      "n": 30
+     },
+     "urgent_avg_wait_min": {
+      "mean": 184.918,
+      "sd": 29.4557,
+      "ci95": 10.9977,
+      "n": 30
+     },
+     "peak_success_rate": {
+      "mean": 0.5729,
+      "sd": 0.0296,
+      "ci95": 0.0111,
+      "n": 30
+     },
+     "backfilled_meetings": {
+      "mean": 6.9,
+      "sd": 2.187,
+      "ci95": 0.8165,
+      "n": 30
+     }
+    }
+   },
+   "improvement": {
+    "intelligent_vs_fcfs": {
+     "avg_wait_min": {
+      "candidate_mean": 322.3173,
+      "baseline_mean": 351.4747,
+      "pct_improvement": 8.3,
+      "paired_diff_mean": 29.1573,
+      "paired_diff_ci95": 6.0491,
+      "verdict": "better"
+     },
+     "median_wait_min": {
+      "candidate_mean": 262.1,
+      "baseline_mean": 303.5167,
+      "pct_improvement": 13.65,
+      "paired_diff_mean": 41.4167,
+      "paired_diff_ci95": 9.6011,
+      "verdict": "better"
+     },
+     "p90_wait_min": {
+      "candidate_mean": 651.2567,
+      "baseline_mean": 695.1933,
+      "pct_improvement": 6.32,
+      "paired_diff_mean": 43.9367,
+      "paired_diff_ci95": 17.3708,
+      "verdict": "better"
+     },
+     "avg_wait_incl_unserved_min": {
+      "candidate_mean": 344.5973,
+      "baseline_mean": 395.778,
+      "pct_improvement": 12.93,
+      "paired_diff_mean": 51.1807,
+      "paired_diff_ci95": 4.4773,
+      "verdict": "better"
+     },
+     "served_meetings": {
+      "candidate_mean": 278.2667,
+      "baseline_mean": 233.2333,
+      "pct_improvement": 19.31,
+      "paired_diff_mean": 45.0333,
+      "paired_diff_ci95": 2.3296,
+      "verdict": "better"
+     },
+     "success_rate": {
+      "candidate_mean": 0.5797,
+      "baseline_mean": 0.4859,
+      "pct_improvement": 19.31,
+      "paired_diff_mean": 0.0938,
+      "paired_diff_ci95": 0.0049,
+      "verdict": "better"
+     },
+     "faculty_idle_min": {
+      "candidate_mean": 2404.8333,
+      "baseline_mean": 3141.1667,
+      "pct_improvement": 23.44,
+      "paired_diff_mean": 736.3333,
+      "paired_diff_ci95": 40.2183,
+      "verdict": "better"
+     },
+     "utilization": {
+      "candidate_mean": 0.6592,
+      "baseline_mean": 0.5542,
+      "pct_improvement": 18.95,
+      "paired_diff_mean": 0.105,
+      "paired_diff_ci95": 0.0064,
+      "verdict": "better"
+     },
+     "wasted_min": {
+      "candidate_mean": 368.8333,
+      "baseline_mean": 417,
+      "pct_improvement": 11.55,
+      "paired_diff_mean": 48.1667,
+      "paired_diff_ci95": 20.4881,
+      "verdict": "better"
+     },
+     "schedule_conflicts": {
+      "candidate_mean": 0,
+      "baseline_mean": 165.7667,
+      "pct_improvement": 100.0,
+      "paired_diff_mean": 165.7667,
+      "paired_diff_ci95": 4.2657,
+      "verdict": "better"
+     },
+     "cancellations": {
+      "candidate_mean": 22.3,
+      "baseline_mean": 18.3333,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "no_shows": {
+      "candidate_mean": 14.1,
+      "baseline_mean": 12.2333,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "fairness_jain": {
+      "candidate_mean": 0.7363,
+      "baseline_mean": 0.6579,
+      "pct_improvement": 11.93,
+      "paired_diff_mean": 0.0785,
+      "paired_diff_ci95": 0.007,
+      "verdict": "better"
+     },
+     "fairness_wait_jain": {
+      "candidate_mean": 0.7713,
+      "baseline_mean": 0.7718,
+      "pct_improvement": -0.06,
+      "paired_diff_mean": -0.0005,
+      "paired_diff_ci95": 0.0139,
+      "verdict": "no_clear_difference"
+     },
+     "students_served": {
+      "candidate_mean": 101.3,
+      "baseline_mean": 93.9333,
+      "pct_improvement": 7.84,
+      "paired_diff_mean": 7.3667,
+      "paired_diff_ci95": 1.0445,
+      "verdict": "better"
+     },
+     "urgent_success_rate": {
+      "candidate_mean": 0.3749,
+      "baseline_mean": 0.2213,
+      "pct_improvement": 69.42,
+      "paired_diff_mean": 0.1536,
+      "paired_diff_ci95": 0.0297,
+      "verdict": "better"
+     },
+     "urgent_avg_wait_min": {
+      "candidate_mean": 184.918,
+      "baseline_mean": 181.7597,
+      "pct_improvement": -1.74,
+      "paired_diff_mean": -3.1583,
+      "paired_diff_ci95": 12.8998,
+      "verdict": "no_clear_difference"
+     },
+     "peak_success_rate": {
+      "candidate_mean": 0.5729,
+      "baseline_mean": 0.4783,
+      "pct_improvement": 19.77,
+      "paired_diff_mean": 0.0946,
+      "paired_diff_ci95": 0.0064,
+      "verdict": "better"
+     },
+     "backfilled_meetings": {
+      "candidate_mean": 6.9,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "verdict": "informational"
+     }
+    },
+    "intelligent_vs_rule_based": {
+     "avg_wait_min": {
+      "candidate_mean": 322.3173,
+      "baseline_mean": 316.86,
+      "pct_improvement": -1.72,
+      "paired_diff_mean": -5.4573,
+      "paired_diff_ci95": 1.6781,
+      "verdict": "worse"
+     },
+     "median_wait_min": {
+      "candidate_mean": 262.1,
+      "baseline_mean": 257.1667,
+      "pct_improvement": -1.92,
+      "paired_diff_mean": -4.9333,
+      "paired_diff_ci95": 3.0228,
+      "verdict": "worse"
+     },
+     "p90_wait_min": {
+      "candidate_mean": 651.2567,
+      "baseline_mean": 644.0133,
+      "pct_improvement": -1.12,
+      "paired_diff_mean": -7.2433,
+      "paired_diff_ci95": 5.4058,
+      "verdict": "worse"
+     },
+     "avg_wait_incl_unserved_min": {
+      "candidate_mean": 344.5973,
+      "baseline_mean": 342.596,
+      "pct_improvement": -0.58,
+      "paired_diff_mean": -2.0013,
+      "paired_diff_ci95": 1.5909,
+      "verdict": "worse"
+     },
+     "served_meetings": {
+      "candidate_mean": 278.2667,
+      "baseline_mean": 272.2,
+      "pct_improvement": 2.23,
+      "paired_diff_mean": 6.0667,
+      "paired_diff_ci95": 1.0915,
+      "verdict": "better"
+     },
+     "success_rate": {
+      "candidate_mean": 0.5797,
+      "baseline_mean": 0.5671,
+      "pct_improvement": 2.23,
+      "paired_diff_mean": 0.0126,
+      "paired_diff_ci95": 0.0023,
+      "verdict": "better"
+     },
+     "faculty_idle_min": {
+      "candidate_mean": 2404.8333,
+      "baseline_mean": 2489.3333,
+      "pct_improvement": 3.39,
+      "paired_diff_mean": 84.5,
+      "paired_diff_ci95": 14.3548,
+      "verdict": "better"
+     },
+     "utilization": {
+      "candidate_mean": 0.6592,
+      "baseline_mean": 0.6471,
+      "pct_improvement": 1.86,
+      "paired_diff_mean": 0.012,
+      "paired_diff_ci95": 0.002,
+      "verdict": "better"
+     },
+     "wasted_min": {
+      "candidate_mean": 368.8333,
+      "baseline_mean": 440.6667,
+      "pct_improvement": 16.3,
+      "paired_diff_mean": 71.8333,
+      "paired_diff_ci95": 11.7608,
+      "verdict": "better"
+     },
+     "schedule_conflicts": {
+      "candidate_mean": 0,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "paired_diff_mean": 0.0,
+      "paired_diff_ci95": 0.0,
+      "verdict": "no_clear_difference"
+     },
+     "cancellations": {
+      "candidate_mean": 22.3,
+      "baseline_mean": 21.9667,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "no_shows": {
+      "candidate_mean": 14.1,
+      "baseline_mean": 14.3,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "fairness_jain": {
+      "candidate_mean": 0.7363,
+      "baseline_mean": 0.7244,
+      "pct_improvement": 1.65,
+      "paired_diff_mean": 0.0119,
+      "paired_diff_ci95": 0.0044,
+      "verdict": "better"
+     },
+     "fairness_wait_jain": {
+      "candidate_mean": 0.7713,
+      "baseline_mean": 0.7664,
+      "pct_improvement": 0.64,
+      "paired_diff_mean": 0.0049,
+      "paired_diff_ci95": 0.0069,
+      "verdict": "no_clear_difference"
+     },
+     "students_served": {
+      "candidate_mean": 101.3,
+      "baseline_mean": 100.2667,
+      "pct_improvement": 1.03,
+      "paired_diff_mean": 1.0333,
+      "paired_diff_ci95": 0.6613,
+      "verdict": "better"
+     },
+     "urgent_success_rate": {
+      "candidate_mean": 0.3749,
+      "baseline_mean": 0.3179,
+      "pct_improvement": 17.94,
+      "paired_diff_mean": 0.057,
+      "paired_diff_ci95": 0.017,
+      "verdict": "better"
+     },
+     "urgent_avg_wait_min": {
+      "candidate_mean": 184.918,
+      "baseline_mean": 171.287,
+      "pct_improvement": -7.96,
+      "paired_diff_mean": -13.631,
+      "paired_diff_ci95": 6.7428,
+      "verdict": "worse"
+     },
+     "peak_success_rate": {
+      "candidate_mean": 0.5729,
+      "baseline_mean": 0.5595,
+      "pct_improvement": 2.4,
+      "paired_diff_mean": 0.0134,
+      "paired_diff_ci95": 0.0031,
+      "verdict": "better"
+     },
+     "backfilled_meetings": {
+      "candidate_mean": 6.9,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "verdict": "informational"
+     }
+    },
+    "rule_based_vs_fcfs": {
+     "avg_wait_min": {
+      "candidate_mean": 316.86,
+      "baseline_mean": 351.4747,
+      "pct_improvement": 9.85,
+      "paired_diff_mean": 34.6147,
+      "paired_diff_ci95": 6.5546,
+      "verdict": "better"
+     },
+     "median_wait_min": {
+      "candidate_mean": 257.1667,
+      "baseline_mean": 303.5167,
+      "pct_improvement": 15.27,
+      "paired_diff_mean": 46.35,
+      "paired_diff_ci95": 9.1707,
+      "verdict": "better"
+     },
+     "p90_wait_min": {
+      "candidate_mean": 644.0133,
+      "baseline_mean": 695.1933,
+      "pct_improvement": 7.36,
+      "paired_diff_mean": 51.18,
+      "paired_diff_ci95": 18.9266,
+      "verdict": "better"
+     },
+     "avg_wait_incl_unserved_min": {
+      "candidate_mean": 342.596,
+      "baseline_mean": 395.778,
+      "pct_improvement": 13.44,
+      "paired_diff_mean": 53.182,
+      "paired_diff_ci95": 4.2991,
+      "verdict": "better"
+     },
+     "served_meetings": {
+      "candidate_mean": 272.2,
+      "baseline_mean": 233.2333,
+      "pct_improvement": 16.71,
+      "paired_diff_mean": 38.9667,
+      "paired_diff_ci95": 2.1403,
+      "verdict": "better"
+     },
+     "success_rate": {
+      "candidate_mean": 0.5671,
+      "baseline_mean": 0.4859,
+      "pct_improvement": 16.71,
+      "paired_diff_mean": 0.0812,
+      "paired_diff_ci95": 0.0045,
+      "verdict": "better"
+     },
+     "faculty_idle_min": {
+      "candidate_mean": 2489.3333,
+      "baseline_mean": 3141.1667,
+      "pct_improvement": 20.75,
+      "paired_diff_mean": 651.8333,
+      "paired_diff_ci95": 36.8651,
+      "verdict": "better"
+     },
+     "utilization": {
+      "candidate_mean": 0.6471,
+      "baseline_mean": 0.5542,
+      "pct_improvement": 16.78,
+      "paired_diff_mean": 0.093,
+      "paired_diff_ci95": 0.0059,
+      "verdict": "better"
+     },
+     "wasted_min": {
+      "candidate_mean": 440.6667,
+      "baseline_mean": 417,
+      "pct_improvement": -5.68,
+      "paired_diff_mean": -23.6667,
+      "paired_diff_ci95": 18.6162,
+      "verdict": "worse"
+     },
+     "schedule_conflicts": {
+      "candidate_mean": 0,
+      "baseline_mean": 165.7667,
+      "pct_improvement": 100.0,
+      "paired_diff_mean": 165.7667,
+      "paired_diff_ci95": 4.2657,
+      "verdict": "better"
+     },
+     "cancellations": {
+      "candidate_mean": 21.9667,
+      "baseline_mean": 18.3333,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "no_shows": {
+      "candidate_mean": 14.3,
+      "baseline_mean": 12.2333,
+      "pct_improvement": null,
+      "verdict": "informational"
+     },
+     "fairness_jain": {
+      "candidate_mean": 0.7244,
+      "baseline_mean": 0.6579,
+      "pct_improvement": 10.12,
+      "paired_diff_mean": 0.0666,
+      "paired_diff_ci95": 0.0075,
+      "verdict": "better"
+     },
+     "fairness_wait_jain": {
+      "candidate_mean": 0.7664,
+      "baseline_mean": 0.7718,
+      "pct_improvement": -0.7,
+      "paired_diff_mean": -0.0054,
+      "paired_diff_ci95": 0.0114,
+      "verdict": "no_clear_difference"
+     },
+     "students_served": {
+      "candidate_mean": 100.2667,
+      "baseline_mean": 93.9333,
+      "pct_improvement": 6.74,
+      "paired_diff_mean": 6.3333,
+      "paired_diff_ci95": 1.08,
+      "verdict": "better"
+     },
+     "urgent_success_rate": {
+      "candidate_mean": 0.3179,
+      "baseline_mean": 0.2213,
+      "pct_improvement": 43.65,
+      "paired_diff_mean": 0.0966,
+      "paired_diff_ci95": 0.0256,
+      "verdict": "better"
+     },
+     "urgent_avg_wait_min": {
+      "candidate_mean": 171.287,
+      "baseline_mean": 181.7597,
+      "pct_improvement": 5.76,
+      "paired_diff_mean": 10.4727,
+      "paired_diff_ci95": 11.9119,
+      "verdict": "no_clear_difference"
+     },
+     "peak_success_rate": {
+      "candidate_mean": 0.5595,
+      "baseline_mean": 0.4783,
+      "pct_improvement": 16.97,
+      "paired_diff_mean": 0.0812,
+      "paired_diff_ci95": 0.0066,
+      "verdict": "better"
+     },
+     "backfilled_meetings": {
+      "candidate_mean": 0,
+      "baseline_mean": 0,
+      "pct_improvement": null,
+      "verdict": "informational"
+     }
+    }
+   },
+   "conclusions": [
+    "Waiting time: intelligent 322 min vs FCFS 351 min (8.3% lower, better) and vs rule-based 317 min (1.7% higher, worse).",
+    "Meetings held: 278 vs 233 (FCFS) and 272 (rule-based); success rate 58.0% vs 48.6% and 56.7%.",
+    "Faculty time: idle time 2405 min vs 3141 (FCFS) / 2489 (rule-based); schedule conflicts 0 vs 166 (FCFS) and 0 (rule-based).",
+    "Fairness (Jain): 0.736 vs 0.658 (FCFS) and 0.724 (rule-based); urgent requests held 37.5% vs 22.1% and 31.8%.",
+    "Weakest metric for the intelligent method: Median waiting time (-1.9% vs rule-based, worse). Most of the gain over FCFS comes from respecting the class timetable and flexible meeting lengths (already present in rule-based); the scoring layer adds smaller gains. Data are synthetic."
+   ],
+   "weakest_metric": {
+    "metric": "median_wait_min",
+    "pct_improvement": -1.92,
+    "verdict": "worse"
+   }
+  }
+ },
+ "ablation": {
+  "load": "medium",
+  "seeds": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30
+  ],
+  "variants": {
+   "full": {
+    "avg_wait_min": {
+     "mean": 275.215,
+     "sd": 23.0467,
+     "ci95": 8.6048,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6504,
+     "sd": 0.0251,
+     "ci95": 0.0094,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3106.8333,
+     "sd": 312.2153,
+     "ci95": 116.57,
+     "n": 30
+    },
+    "wasted_min": {
+     "mean": 331.6667,
+     "sd": 79.8526,
+     "ci95": 29.8141,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.7622,
+     "sd": 0.0243,
+     "ci95": 0.0091,
+     "n": 30
+    },
+    "students_served": {
+     "mean": 93.7667,
+     "sd": 4.3445,
+     "ci95": 1.6221,
+     "n": 30
+    },
+    "urgent_success_rate": {
+     "mean": 0.4631,
+     "sd": 0.1014,
+     "ci95": 0.0379,
+     "n": 30
+    }
+   },
+   "no_fairness": {
+    "avg_wait_min": {
+     "mean": 275.4717,
+     "sd": 23.4141,
+     "ci95": 8.742,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6505,
+     "sd": 0.0257,
+     "ci95": 0.0096,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3106.6667,
+     "sd": 310.8063,
+     "ci95": 116.044,
+     "n": 30
+    },
+    "wasted_min": {
+     "mean": 331.3333,
+     "sd": 81.1441,
+     "ci95": 30.2963,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.7591,
+     "sd": 0.0252,
+     "ci95": 0.0094,
+     "n": 30
+    },
+    "students_served": {
+     "mean": 93.4333,
+     "sd": 4.4387,
+     "ci95": 1.6573,
+     "n": 30
+    },
+    "urgent_success_rate": {
+     "mean": 0.4648,
+     "sd": 0.1014,
+     "ci95": 0.0378,
+     "n": 30
+    }
+   },
+   "no_slack": {
+    "avg_wait_min": {
+     "mean": 274.7353,
+     "sd": 23.0306,
+     "ci95": 8.5988,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6506,
+     "sd": 0.0254,
+     "ci95": 0.0095,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3105.8333,
+     "sd": 310.0197,
+     "ci95": 115.7503,
+     "n": 30
+    },
+    "wasted_min": {
+     "mean": 330.3333,
+     "sd": 78.2561,
+     "ci95": 29.218,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.7616,
+     "sd": 0.0239,
+     "ci95": 0.0089,
+     "n": 30
+    },
+    "students_served": {
+     "mean": 93.6667,
+     "sd": 4.3576,
+     "ci95": 1.627,
+     "n": 30
+    },
+    "urgent_success_rate": {
+     "mean": 0.4594,
+     "sd": 0.1002,
+     "ci95": 0.0374,
+     "n": 30
+    }
+   },
+   "no_risk": {
+    "avg_wait_min": {
+     "mean": 275.2087,
+     "sd": 22.859,
+     "ci95": 8.5347,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6504,
+     "sd": 0.0247,
+     "ci95": 0.0092,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3106.3333,
+     "sd": 310.0221,
+     "ci95": 115.7511,
+     "n": 30
+    },
+    "wasted_min": {
+     "mean": 330.8333,
+     "sd": 81.0394,
+     "ci95": 30.2572,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.7625,
+     "sd": 0.0243,
+     "ci95": 0.0091,
+     "n": 30
+    },
+    "students_served": {
+     "mean": 93.7667,
+     "sd": 4.3445,
+     "ci95": 1.6221,
+     "n": 30
+    },
+    "urgent_success_rate": {
+     "mean": 0.4621,
+     "sd": 0.1006,
+     "ci95": 0.0375,
+     "n": 30
+    }
+   },
+   "no_packing": {
+    "avg_wait_min": {
+     "mean": 274.343,
+     "sd": 23.4469,
+     "ci95": 8.7542,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6507,
+     "sd": 0.0253,
+     "ci95": 0.0094,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3106.3333,
+     "sd": 311.4674,
+     "ci95": 116.2908,
+     "n": 30
+    },
+    "wasted_min": {
+     "mean": 330.8333,
+     "sd": 79.8175,
+     "ci95": 29.801,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.762,
+     "sd": 0.0243,
+     "ci95": 0.0091,
+     "n": 30
+    },
+    "students_served": {
+     "mean": 93.7333,
+     "sd": 4.3385,
+     "ci95": 1.6199,
+     "n": 30
+    },
+    "urgent_success_rate": {
+     "mean": 0.4645,
+     "sd": 0.0997,
+     "ci95": 0.0372,
+     "n": 30
+    }
+   },
+   "no_peak_spreading": {
+    "avg_wait_min": {
+     "mean": 275.1957,
+     "sd": 22.9437,
+     "ci95": 8.5663,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6504,
+     "sd": 0.0249,
+     "ci95": 0.0093,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3107.1667,
+     "sd": 310.3465,
+     "ci95": 115.8723,
+     "n": 30
+    },
+    "wasted_min": {
+     "mean": 331.0,
+     "sd": 77.8748,
+     "ci95": 29.0757,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.7622,
+     "sd": 0.0242,
+     "ci95": 0.009,
+     "n": 30
+    },
+    "students_served": {
+     "mean": 93.7667,
+     "sd": 4.3445,
+     "ci95": 1.6221,
+     "n": 30
+    },
+    "urgent_success_rate": {
+     "mean": 0.4645,
+     "sd": 0.0997,
+     "ci95": 0.0372,
+     "n": 30
+    }
+   },
+   "no_backfill": {
+    "avg_wait_min": {
+     "mean": 273.508,
+     "sd": 23.8956,
+     "ci95": 8.9218,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6408,
+     "sd": 0.0263,
+     "ci95": 0.0098,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3158.0,
+     "sd": 317.9883,
+     "ci95": 118.7254,
+     "n": 30
+    },
+    "wasted_min": {
+     "mean": 375.8333,
+     "sd": 83.4915,
+     "ci95": 31.1727,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.7545,
+     "sd": 0.0251,
+     "ci95": 0.0094,
+     "n": 30
+    },
+    "students_served": {
+     "mean": 93.1667,
+     "sd": 4.3078,
+     "ci95": 1.6084,
+     "n": 30
+    },
+    "urgent_success_rate": {
+     "mean": 0.4349,
+     "sd": 0.1056,
+     "ci95": 0.0394,
+     "n": 30
+    }
+   },
+   "no_displacement": {
+    "avg_wait_min": {
+     "mean": 273.9857,
+     "sd": 22.813,
+     "ci95": 8.5175,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6496,
+     "sd": 0.0249,
+     "ci95": 0.0093,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3111.0,
+     "sd": 316.8661,
+     "ci95": 118.3065,
+     "n": 30
+    },
+    "wasted_min": {
+     "mean": 332.5,
+     "sd": 79.5543,
+     "ci95": 29.7027,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.7626,
+     "sd": 0.0233,
+     "ci95": 0.0087,
+     "n": 30
+    },
+    "students_served": {
+     "mean": 93.8333,
+     "sd": 4.2918,
+     "ci95": 1.6024,
+     "n": 30
+    },
+    "urgent_success_rate": {
+     "mean": 0.4492,
+     "sd": 0.1061,
+     "ci95": 0.0396,
+     "n": 30
+    }
+   }
+  }
+ },
+ "sensitivity": {
+  "load": "medium",
+  "seeds": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30
+  ],
+  "variants": {
+   "fcfs_default (15-min slots, clash found at meeting)": {
+    "avg_wait_min": {
+     "mean": 299.1653,
+     "sd": 24.4599,
+     "ci95": 9.1325,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.5685,
+     "sd": 0.0266,
+     "ci95": 0.0099,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3598.0,
+     "sd": 293.4386,
+     "ci95": 109.5595,
+     "n": 30
+    },
+    "schedule_conflicts": {
+     "mean": 134.8,
+     "sd": 10.3037,
+     "ci95": 3.847,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.6969,
+     "sd": 0.0281,
+     "ci95": 0.0105,
+     "n": 30
+    }
+   },
+   "fcfs_clash_found_at_day_start": {
+    "avg_wait_min": {
+     "mean": 304.2707,
+     "sd": 25.959,
+     "ci95": 9.6922,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.5798,
+     "sd": 0.0246,
+     "ci95": 0.0092,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3546.6667,
+     "sd": 293.7314,
+     "ci95": 109.6688,
+     "n": 30
+    },
+    "schedule_conflicts": {
+     "mean": 197.7,
+     "sd": 15.1,
+     "ci95": 5.6378,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.703,
+     "sd": 0.0245,
+     "ci95": 0.0092,
+     "n": 30
+    }
+   },
+   "fcfs_flexible_5min_slots": {
+    "avg_wait_min": {
+     "mean": 264.4647,
+     "sd": 22.2252,
+     "ci95": 8.2981,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6281,
+     "sd": 0.0252,
+     "ci95": 0.0094,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3235.0,
+     "sd": 290.5376,
+     "ci95": 108.4763,
+     "n": 30
+    },
+    "schedule_conflicts": {
+     "mean": 134.5333,
+     "sd": 10.0781,
+     "ci95": 3.7628,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.7408,
+     "sd": 0.0253,
+     "ci95": 0.0094,
+     "n": 30
+    }
+   },
+   "fcfs_both_relaxed": {
+    "avg_wait_min": {
+     "mean": 265.8253,
+     "sd": 23.7925,
+     "ci95": 8.8833,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.64,
+     "sd": 0.0268,
+     "ci95": 0.01,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3168.1667,
+     "sd": 301.832,
+     "ci95": 112.6933,
+     "n": 30
+    },
+    "schedule_conflicts": {
+     "mean": 182.5667,
+     "sd": 14.9935,
+     "ci95": 5.598,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.753,
+     "sd": 0.0231,
+     "ci95": 0.0086,
+     "n": 30
+    }
+   },
+   "rule_based (reference)": {
+    "avg_wait_min": {
+     "mean": 270.2863,
+     "sd": 23.8864,
+     "ci95": 8.9183,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6409,
+     "sd": 0.0268,
+     "ci95": 0.01,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3159.1667,
+     "sd": 317.7102,
+     "ci95": 118.6216,
+     "n": 30
+    },
+    "schedule_conflicts": {
+     "mean": 0.0,
+     "sd": 0.0,
+     "ci95": 0.0,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.753,
+     "sd": 0.0235,
+     "ci95": 0.0088,
+     "n": 30
+    }
+   },
+   "intelligent (reference)": {
+    "avg_wait_min": {
+     "mean": 275.215,
+     "sd": 23.0467,
+     "ci95": 8.6048,
+     "n": 30
+    },
+    "success_rate": {
+     "mean": 0.6504,
+     "sd": 0.0251,
+     "ci95": 0.0094,
+     "n": 30
+    },
+    "faculty_idle_min": {
+     "mean": 3106.8333,
+     "sd": 312.2153,
+     "ci95": 116.57,
+     "n": 30
+    },
+    "schedule_conflicts": {
+     "mean": 0.0,
+     "sd": 0.0,
+     "ci95": 0.0,
+     "n": 30
+    },
+    "fairness_jain": {
+     "mean": 0.7622,
+     "sd": 0.0243,
+     "ci95": 0.0091,
+     "n": 30
+    }
+   }
+  }
+ },
+ "conclusions": [
+  "Waiting time: intelligent 275 min vs FCFS 299 min (8.0% lower, better) and vs rule-based 270 min (1.8% higher, worse).",
+  "Meetings held: 234 vs 205 (FCFS) and 231 (rule-based); success rate 65.0% vs 56.9% and 64.1%.",
+  "Faculty time: idle time 3107 min vs 3598 (FCFS) / 3159 (rule-based); schedule conflicts 0 vs 135 (FCFS) and 0 (rule-based).",
+  "Fairness (Jain): 0.762 vs 0.697 (FCFS) and 0.753 (rule-based); urgent requests held 46.3% vs 31.4% and 41.4%.",
+  "Weakest metric for the intelligent method: Average waiting time (-1.8% vs rule-based, worse). Most of the gain over FCFS comes from respecting the class timetable and flexible meeting lengths (already present in rule-based); the scoring layer adds smaller gains. Data are synthetic."
+ ],
+ "sample_run": {
+  "seed": 1,
+  "load": "medium",
+  "metrics": {
+   "fcfs": {
+    "total_requests": 360,
+    "served_meetings": 219,
+    "scheduled_meetings": 245,
+    "success_rate": 0.6083,
+    "avg_wait_min": 269.33,
+    "median_wait_min": 210,
+    "p90_wait_min": 525.6,
+    "avg_wait_incl_unserved_min": 299.81,
+    "faculty_idle_min": 3435,
+    "utilization": 0.5131,
+    "wasted_min": 270,
+    "schedule_conflicts": 133,
+    "cancellations": 16,
+    "cancel_wasted_min": 75,
+    "no_shows": 10,
+    "no_show_wasted_min": 195,
+    "fairness_jain": 0.7078,
+    "fairness_wait_jain": 0.6699,
+    "students_served": 88,
+    "students_requesting": 112,
+    "urgent_success_rate": 0.5909,
+    "urgent_avg_wait_min": 153.08,
+    "peak_success_rate": 0.6157,
+    "peak_avg_wait_min": 266.94,
+    "backfilled_meetings": 0,
+    "collisions_rebooked": 133
+   },
+   "rule_based": {
+    "total_requests": 360,
+    "served_meetings": 237,
+    "scheduled_meetings": 264,
+    "success_rate": 0.6583,
+    "avg_wait_min": 230.16,
+    "median_wait_min": 183,
+    "p90_wait_min": 430.8,
+    "avg_wait_incl_unserved_min": 258.2,
+    "faculty_idle_min": 3140,
+    "utilization": 0.5549,
+    "wasted_min": 315,
+    "schedule_conflicts": 0,
+    "cancellations": 16,
+    "cancel_wasted_min": 155,
+    "no_shows": 11,
+    "no_show_wasted_min": 160,
+    "fairness_jain": 0.7441,
+    "fairness_wait_jain": 0.6862,
+    "students_served": 91,
+    "students_requesting": 112,
+    "urgent_success_rate": 0.6818,
+    "urgent_avg_wait_min": 125.53,
+    "peak_success_rate": 0.6471,
+    "peak_avg_wait_min": 238.78,
+    "backfilled_meetings": 0,
+    "collisions_rebooked": 0
+   },
+   "intelligent": {
+    "total_requests": 360,
+    "served_meetings": 240,
+    "scheduled_meetings": 268,
+    "success_rate": 0.6667,
+    "avg_wait_min": 239.93,
+    "median_wait_min": 199.5,
+    "p90_wait_min": 447.5,
+    "avg_wait_incl_unserved_min": 258.97,
+    "faculty_idle_min": 3095,
+    "utilization": 0.5613,
+    "wasted_min": 275,
+    "schedule_conflicts": 0,
+    "cancellations": 17,
+    "cancel_wasted_min": 130,
+    "no_shows": 11,
+    "no_show_wasted_min": 145,
+    "fairness_jain": 0.734,
+    "fairness_wait_jain": 0.7045,
+    "students_served": 90,
+    "students_requesting": 112,
+    "urgent_success_rate": 0.6364,
+    "urgent_avg_wait_min": 140.29,
+    "peak_success_rate": 0.651,
+    "peak_avg_wait_min": 245.27,
+    "backfilled_meetings": 6,
+    "collisions_rebooked": 0
+   }
+  }
+ }
+}

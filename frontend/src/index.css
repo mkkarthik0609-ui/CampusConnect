@@ -1,0 +1,317 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/figtree";
+@import "@fontsource-variable/bricolage-grotesque/opsz.css";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* ==========================================================================
+   Campus Connect design system - "Ink & saffron"
+   Deep ink-navy chrome, cobalt for action, one saffron accent for what needs attention.
+   Cool paper surfaces in light mode, ink-blue surfaces in dark mode.
+   Bricolage Grotesque for headings + numerals, Figtree for UI text, JetBrains Mono for IDs only.
+
+   Structure:
+     1. Raw tokens (:root / .dark)        <- the single source of truth, ported from the Flask CSS
+     2. @theme inline                     <- exposes the tokens to Tailwind (bg-primary, text-muted-foreground, ...)
+     3. Base layer                        <- type, focus, selection, scrollbars, reduced motion
+     4. A few shared component classes    <- only where a utility string would be unreadable
+   Dark mode is the `.dark` class on <html> (see src/lib/theme.jsx).
+   ========================================================================== */
+
+@custom-variant dark (&:is(.dark *));
+
+/* ---------- 1. Tokens ---------- */
+:root {
+  color-scheme: light;
+
+  /* surfaces */
+  --bg: #f2f4fa;
+  --surface: #ffffff;
+  --surface-2: #f7f8fc;
+  --sunken: #e8ebf5;
+  --line: #dde1ee;
+  --line-strong: #c2c8dc;
+
+  /* text */
+  --ink: #111528;
+  --ink-2: #343b5a;
+  --muted: #545c7c;
+
+  /* action */
+  --primary: #2444c7;
+  --primary-hover: #1a36a6;
+  --primary-press: #142c88;
+  --primary-soft: #e4e9fc;
+  --primary-ink: #1a36a6;
+  --on-primary: #ffffff;
+  --focus: #2444c7;
+
+  /* accent (saffron) */
+  --accent-saffron: #f0a30a;
+  --accent-soft: #fdf0cf;
+  --accent-ink: #7a4a00;
+  --on-accent: #2b1a00;
+
+  /* semantic */
+  --ok-bg: #dcf3e6;     --ok-ink: #0f5c38;     --ok-line: #b3e0c6;
+  --warn-bg: #fdf0cf;   --warn-ink: #7a4a00;   --warn-line: #f2d98f;
+  --danger-bg: #fde6e3; --danger-ink: #a5200f; --danger-line: #f5b9b2;
+  --info-bg: #e4e9fc;   --info-ink: #1a36a6;   --info-line: #bccaf7;
+  --neutral-bg: #e8ebf5; --neutral-ink: #454d6d;
+  --danger-solid: #c62a1a;
+  --on-danger: #ffffff;
+
+  /* chrome (sidebar, guest panel, landing dark bands) */
+  --nav-bg: #111741;
+  --nav-ink: #d4daf7;
+  --nav-muted: #a3acdc;
+  --nav-hover: rgba(255, 255, 255, 0.08);
+  --nav-active: rgba(255, 255, 255, 0.15);
+  --nav-line: rgba(255, 255, 255, 0.12);
+  --mark-bg: #2444c7;
+
+  /* depth */
+  --shadow-1: 0 1px 2px rgba(17, 21, 40, 0.06), 0 6px 18px -10px rgba(17, 21, 40, 0.12);
+  --shadow-2: 0 2px 4px rgba(17, 21, 40, 0.08), 0 18px 40px -16px rgba(17, 21, 40, 0.28);
+
+  --nav-w: 15.5rem;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --bg: #0b0e1c;
+  --surface: #131833;
+  --surface-2: #181e3d;
+  --sunken: #0a0d1a;
+  --line: #262d4f;
+  --line-strong: #3a446f;
+
+  --ink: #eceffc;
+  --ink-2: #c8cee8;
+  --muted: #9ba4c8;
+
+  --primary: #8fa3ff;
+  --primary-hover: #aab9ff;
+  --primary-press: #c2cdff;
+  --primary-soft: #1f2858;
+  --primary-ink: #bcc8ff;
+  --on-primary: #0a1033;
+  --focus: #a9b8ff;
+
+  --accent-saffron: #f5b53a;
+  --accent-soft: #352709;
+  --accent-ink: #f6c65f;
+  --on-accent: #2b1a00;
+
+  --ok-bg: #10301f;     --ok-ink: #7fe3ac;     --ok-line: #1d5236;
+  --warn-bg: #352709;   --warn-ink: #f6c65f;   --warn-line: #5c4512;
+  --danger-bg: #3b1614; --danger-ink: #ffa097; --danger-line: #6b2a25;
+  --info-bg: #1f2858;   --info-ink: #bcc8ff;   --info-line: #36438a;
+  --neutral-bg: #1e2444; --neutral-ink: #b4bcdc;
+  --danger-solid: #ff8f85;
+  --on-danger: #2a0a08;
+
+  --nav-bg: #080b1a;
+  --nav-ink: #cdd3f2;
+  --nav-muted: #99a2cf;
+  --nav-hover: rgba(255, 255, 255, 0.06);
+  --nav-active: rgba(143, 163, 255, 0.18);
+  --nav-line: rgba(255, 255, 255, 0.1);
+  --mark-bg: #3a55d8;
+
+  --shadow-1: 0 0 0 rgba(0, 0, 0, 0);
+  --shadow-2: 0 18px 44px -14px rgba(0, 0, 0, 0.7);
+}
+
+/* ---------- 2. Tailwind theme (shadcn names + Campus Connect names) ---------- */
+@theme inline {
+  --font-sans: "Figtree Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Figtree Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /* shadcn semantic colours -> ink & saffron */
+  --color-background: var(--bg);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--on-primary);
+  --color-secondary: var(--sunken);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--sunken);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--primary-soft);
+  --color-accent-foreground: var(--primary-ink);
+  --color-destructive: var(--danger-solid);
+  --color-destructive-foreground: var(--on-danger);
+  --color-border: var(--line);
+  --color-input: var(--line-strong);
+  --color-ring: var(--focus);
+
+  /* Campus Connect names */
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-press: var(--primary-press);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-ink: var(--primary-ink);
+  --color-saffron: var(--accent-saffron);
+  --color-saffron-soft: var(--accent-soft);
+  --color-saffron-ink: var(--accent-ink);
+  --color-on-saffron: var(--on-accent);
+
+  --color-ok: var(--ok-bg);        --color-ok-ink: var(--ok-ink);        --color-ok-line: var(--ok-line);
+  --color-warn: var(--warn-bg);    --color-warn-ink: var(--warn-ink);    --color-warn-line: var(--warn-line);
+  --color-danger: var(--danger-bg); --color-danger-ink: var(--danger-ink); --color-danger-line: var(--danger-line);
+  --color-info: var(--info-bg);    --color-info-ink: var(--info-ink);    --color-info-line: var(--info-line);
+  --color-neutral: var(--neutral-bg); --color-neutral-ink: var(--neutral-ink);
+
+  --color-nav: var(--nav-bg);
+  --color-nav-ink: var(--nav-ink);
+  --color-nav-muted: var(--nav-muted);
+  --color-nav-hover: var(--nav-hover);
+  --color-nav-active: var(--nav-active);
+  --color-nav-line: var(--nav-line);
+  --color-mark: var(--mark-bg);
+
+  /* shape + depth */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+  --shadow-xs: 0 1px 1px rgba(17, 21, 40, 0.04);
+  --shadow-sm: var(--shadow-1);
+  --shadow-md: var(--shadow-2);
+  --shadow-lg: var(--shadow-2);
+
+  --breakpoint-lg: 60rem;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-rise: rise 0.45s var(--ease-out-expo) both;
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+/* ---------- 3. Base ---------- */
+@layer base {
+  *, *::before, *::after { border-color: var(--line); }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 5rem;
+    scrollbar-color: var(--line-strong) transparent;
+    accent-color: var(--primary);
+    caret-color: var(--primary);
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.55;
+    color: var(--ink);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-wrap: break-word;
+  }
+
+  h1, h2, h3, h4 { line-height: 1.2; text-wrap: balance; color: var(--ink); }
+  h1, h2 { font-family: var(--font-display); letter-spacing: -0.015em; font-weight: 700; }
+  h3, h4 { font-weight: 650; }
+
+  a { text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+  strong { font-weight: 650; }
+
+  ::selection { background: var(--primary); color: var(--on-primary); }
+  ::placeholder { color: var(--muted); opacity: 0.85; }
+
+  :focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  :focus:not(:focus-visible) { outline: none; }
+  main:focus { outline: none; }
+
+  /* Native bits that would otherwise ship with browser defaults */
+  input[type="search"] { -webkit-appearance: none; appearance: none; }
+  input[type="file"]::file-selector-button {
+    margin-right: 0.75rem; padding: 0.35rem 0.8rem; border: 1px solid var(--line-strong); border-radius: 8px;
+    background: var(--surface); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:not(:disabled), [role="button"]:not([aria-disabled="true"]) { cursor: pointer; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  @media (forced-colors: active) {
+    [data-slot="button"], [data-slot="badge"] { border: 1px solid ButtonText; }
+  }
+}
+
+/* ---------- 4. Shared component classes ---------- */
+@layer components {
+  /* Skip link: first focusable element in every layout */
+  .skip-link {
+    position: absolute; left: 0.75rem; top: -4rem; z-index: 200;
+    background: var(--ink); color: var(--bg); padding: 0.7rem 1rem; border-radius: var(--radius-sm);
+    font-weight: 600; text-decoration: none;
+  }
+  .skip-link:focus { top: 0.75rem; }
+
+  /* Numbers that line up in tables and stats */
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Page entrance for signed-in routes */
+  .page-enter { animation: var(--animate-rise); }
+
+  /* Scrollbars inside the dark chrome */
+  .scroll-nav { scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
+
+  /* Initials avatar palettes (picked by name length % 5) - see UserAvatar */
+  .av-0 { --av-bg: #2444c7; --av-ink: #fff; }
+  .av-1 { --av-bg: #0f766e; --av-ink: #fff; }
+  .av-2 { --av-bg: #b4530a; --av-ink: #fff; }
+  .av-3 { --av-bg: #7a3fb0; --av-ink: #fff; }
+  .av-4 { --av-bg: #a4244f; --av-ink: #fff; }
+  .dark .av-0 { --av-bg: #8fa3ff; --av-ink: #0a1033; }
+  .dark .av-1 { --av-bg: #4fd1c5; --av-ink: #06201d; }
+  .dark .av-2 { --av-bg: #f5b53a; --av-ink: #2b1a00; }
+  .dark .av-3 { --av-bg: #c79bff; --av-ink: #1f0a38; }
+  .dark .av-4 { --av-bg: #ff8fb1; --av-ink: #3a0a1c; }
+  .av-fill { background: var(--av-bg); color: var(--av-ink); }
+
+  /* Messages (chat bubbles) - shared by the student/faculty/admin chat pages */
+  .bubble { max-width: min(34rem, 78%); padding: 0.55rem 0.85rem; border-radius: 16px; font-size: 0.97rem; line-height: 1.45; overflow-wrap: anywhere; }
+  .bubble-mine { align-self: flex-end; background: var(--primary); color: var(--on-primary); border-bottom-right-radius: 5px; }
+  .bubble-theirs { align-self: flex-start; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
+  @media (max-width: 40rem) { .bubble { max-width: 90%; } }
+}
+
+/* Utility: hide scrollbars on horizontally-scrolling chip rows, etc. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}

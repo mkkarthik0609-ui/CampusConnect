@@ -11,12 +11,9 @@
 
 Build a simple, fully functional, deployable college web application using:
 
-- Python
-- Flask
-- SQLite
-- HTML
-- CSS
-- JavaScript
+- Python + FastAPI (JSON API under `/api/*`)
+- SQLite (standard library `sqlite3`, single writer)
+- React + JavaScript + Vite + Tailwind CSS + shadcn/ui + Framer Motion (SPA in `frontend/`)
 
 The architecture should be understandable to a college project team and should avoid unnecessary complexity.
 
@@ -25,11 +22,11 @@ The architecture should be understandable to a college project team and should a
 # 2. Recommended Architecture
 
 ```text
-Browser
+Browser (React SPA)
    |
-   | HTTP / HTML / JSON
+   | HTTPS / JSON  (/api/*, /uploads/*)
    v
-Flask Application
+FastAPI Application (api/)
    |
    +--------------------+
    |                    |
@@ -49,53 +46,26 @@ The application should be organized into logical modules rather than putting the
 ```text
 campus_connect/
 │
-├── app.py
-├── config.py
+├── app.py                  local runner (uvicorn api.main:app)
+├── create_admin.py
 ├── requirements.txt
-├── README.md
-├── database.db
+├── database.db             (git-ignored)
 │
-├── routes/
-│   ├── auth.py
-│   ├── student.py
-│   ├── faculty.py
-│   ├── admin.py
-│   ├── chat.py
-│   ├── meetings.py
-│   ├── supporting.py
-│   ├── notifications.py
-│   └── scheduling.py
+├── api/
+│   ├── main.py, settings.py, db.py, deps.py, errors.py, security.py, schemas.py
+│   └── routers/            auth, account, academic, notifications, system, uploads,
+│                           student, faculty, chat, meetings, supporting,
+│                           admin, admin_academic, research
 │
 ├── services/
-│   ├── auth_service.py
-│   ├── otp_service.py
-│   ├── chat_service.py
-│   ├── meeting_service.py
-│   ├── notification_service.py
-│   ├── permission_service.py
-│   ├── file_service.py
-│   └── scheduling/
-│       ├── fcfs.py
-│       ├── rule_based.py
-│       ├── intelligent.py
-│       ├── metrics.py
-│       └── simulator.py
+│   ├── auth_service.py, otp_service.py, chat_service.py, meeting_service.py,
+│   │   notification_service.py, permission_service.py, file_service.py,
+│   │   academic_service.py, assignment_service.py, supporting_service.py
+│   └── scheduling/         fcfs.py, rule_based.py, intelligent.py, metrics.py, simulator.py
 │
-├── models/
-│   ├── database.py
-│   └── schema.py
-│
-├── templates/
-│   ├── base.html
-│   ├── auth/
-│   ├── student/
-│   ├── faculty/
-│   └── admin/
-│
-├── static/
-│   ├── css/
-│   ├── js/
-│   └── images/
+├── models/                 database.py (schema), queries.py, academic_queries.py, ...
+├── frontend/               React SPA (src/, vite.config.js, vercel.json)
+├── docs/api/               API contract and per-area docs
 │
 └── uploads/
     ├── profile/
@@ -469,7 +439,7 @@ USER
 
 ## Passwords
 
-Use a standard password hashing library supported by Flask/Python, such as Werkzeug's password hashing utilities.
+Use a standard password hashing library supported by Python, such as Werkzeug's password hashing utilities.
 
 Never:
 - Store plain passwords.
@@ -479,7 +449,7 @@ Never:
 ## Session
 
 After successful login:
-- Store user ID in the Flask session.
+- Store user ID in the signed session cookie.
 - Store role in session or retrieve it from the database.
 - Protect role-specific routes.
 
@@ -773,7 +743,6 @@ Therefore:
 A scheduled background task can periodically find active meetings and send reminder notifications.
 
 Example implementation options:
-- Flask CLI scheduled task
 - APScheduler
 - Deployment cron/job
 
@@ -1412,7 +1381,7 @@ These rules are mandatory for the project:
 
 # 40. Deployment
 
-The application should be deployable as a normal Flask web application.
+The application should be deployable as a FastAPI backend (Render) plus a static React frontend (Vercel); see DEPLOYMENT.md.
 
 Required project configuration:
 - `requirements.txt`

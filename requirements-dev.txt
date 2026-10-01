@@ -3,6 +3,8 @@
 
 pytest==8.3.3
 pytest-cov==5.0.0
+# fastapi.testclient.TestClient
+httpx==0.28.1
 
 # OPTIONAL - only needed for the scheduling research experiment (research/run_experiment.py),
 # NOT for the web app or the test suite. Install separately when required:

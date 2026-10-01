@@ -1,0 +1,31 @@
+/*
+ * Research page chart tokens. Categorical slots 1-3 of the dataviz reference palette, validated for all-pairs
+ * colour-vision separation in both modes. Colour is never the only cue: every mark is directly labelled and the
+ * comparison table carries the same numbers.
+ */
+.rs-root {
+  --rs-fcfs: #2a78d6;
+  --rs-rule: #eb6834;
+  --rs-int: #1baf7a;
+  --rs-grid: var(--line);
+  --rs-class: color-mix(in oklab, var(--ink) 18%, transparent);
+  --rs-window: color-mix(in oklab, var(--primary) 9%, transparent);
+  --rs-conflict: #c62a1a;
+}
+.dark .rs-root {
+  --rs-fcfs: #3987e5;
+  --rs-rule: #d95926;
+  --rs-int: #199e70;
+  --rs-class: color-mix(in oklab, var(--ink) 22%, transparent);
+  --rs-window: color-mix(in oklab, var(--primary) 14%, transparent);
+  --rs-conflict: #ff8f85;
+}
+
+/* Diagonal hatch for "no show" blocks (texture, not colour, tells it apart) */
+.rs-hatch {
+  background-image: repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 5px);
+}
+
+@media (forced-colors: active) {
+  .rs-bar, .rs-block { forced-color-adjust: none; }
+}

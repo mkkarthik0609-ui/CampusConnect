@@ -1,5 +1,8 @@
-# Render Blueprint for the Campus Connect BACKEND (Flask + SQLite, server-rendered).
-# The Vercel project (vercel.json) serves /static and proxies everything else to this service.
+# Render Blueprint for the Campus Connect BACKEND (FastAPI + SQLite, JSON API).
+#
+# The React SPA is deployed separately on Vercel (frontend/vercel.json). Vercel rewrites /api/* and
+# /uploads/* to this service, so the browser only ever sees ONE origin (the Vercel domain): session
+# cookies are first-party and no CORS configuration is needed.
 #
 # A persistent disk requires a PAID instance type (starter or higher). On the free plan the
 # filesystem is ephemeral and the SQLite database + uploads are wiped on every deploy/restart.
@@ -12,8 +15,11 @@ services:
     branch: main
     autoDeploy: true
     buildCommand: pip install -r requirements.txt
-    # EXACTLY ONE worker (in-process APScheduler job + SQLite single writer); concurrency via threads.
-    startCommand: gunicorn wsgi:app -c gunicorn.conf.py --workers 1 --threads 4
+    # EXACTLY ONE process: the meeting-reminder APScheduler job lives in-process and SQLite has a
+    # single writer. Never raise --workers.
+    # --no-proxy-headers: uvicorn must NOT rewrite the client address itself; the app does it
+    # (TRUST_PROXY=1 -> api.security.ProxyHeadersMiddleware, which honours TRUST_PROXY_HOPS).
+    startCommand: python -m uvicorn api.main:app --host 0.0.0.0 --port $PORT --workers 1 --no-proxy-headers
     healthCheckPath: /healthz
     disk:
       name: campus-connect-data
@@ -22,6 +28,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      # production => Secure session cookie, HSTS, SECRET_KEY validation, /docs disabled.
       - key: APP_ENV
         value: production
       - key: SECRET_KEY
@@ -30,14 +37,15 @@ services:
         value: /var/data/campusconnect.db
       - key: UPLOAD_ROOT
         value: /var/data/uploads
-      # Honour X-Forwarded-* from Vercel/Render (public host = the Vercel domain).
+      # Honour X-Forwarded-* (client IP for rate limiting, https scheme).
       - key: TRUST_PROXY
         value: "1"
-      # Proxies in front of the app: Vercel (rewrite) + Render's load balancer = 2.
-      # Use "1" if you point a custom domain straight at Render and skip Vercel.
+      # Proxies in front of the app: Vercel rewrite + Render's load balancer = 2.
+      # Use "1" if a custom domain points straight at Render and Vercel is not in the path.
       - key: TRUST_PROXY_HOPS
         value: "2"
-      # First-admin bootstrap. Fill ADMIN_* in the Render dashboard (values are NOT stored here).
+      # First-admin bootstrap (idempotent, never overwrites an existing password).
+      # Fill ADMIN_* in the Render dashboard; the values are NOT stored in this file.
       - key: BOOTSTRAP_ADMIN
         value: "1"
       - key: ADMIN_NAME
@@ -46,11 +54,12 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      # Signup OTP is displayed on screen (demo). Set to "0" once SMTP delivery is configured.
+      # Signup OTP is returned to the browser and shown on screen (demo mode). Set to "0" once
+      # SMTP delivery is configured.
       - key: SHOW_DEMO_OTP
         value: "1"
       - key: REMINDER_INTERVAL_MINUTES
         value: "60"
-      # Optional SMTP: add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_TLS
-      # in the Render dashboard (Environment tab) when you want e-mail. They are intentionally not
+      # Optional SMTP: add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_TLS in
+      # the Render dashboard (Environment tab) when you want e-mail. They are intentionally not
       # declared here so the Blueprint does not prompt for values you do not have.

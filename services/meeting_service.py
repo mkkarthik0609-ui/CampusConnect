@@ -70,24 +70,37 @@ def respond_to_meeting(meeting_id, faculty_id, accept: bool, faculty_response, m
     return new_status
 
 
+def _actor_party(meeting, actor_user_id, actor_role):
+    """Validate that the actor is the student / faculty member of this meeting."""
+    if actor_role == "STUDENT":
+        student = queries.get_student_by_user_id(actor_user_id)
+        if not student:
+            raise MeetingError("You are not authorized to act on this meeting request.")
+        _require_student_owns_meeting(meeting, student["id"])
+    elif actor_role == "FACULTY":
+        faculty = queries.get_faculty_by_user_id(actor_user_id)
+        if not faculty:
+            raise MeetingError("You are not authorized to act on this meeting request.")
+        _require_faculty_owns_meeting(meeting, faculty["id"])
+    else:
+        raise MeetingError("You are not authorized to act on this meeting request.")
+
+
 def cancel_meeting(meeting_id, actor_user_id, actor_role, reason):
     meeting = queries.get_meeting_by_id(meeting_id)
     if not meeting:
         raise MeetingError("Meeting request not found.")
+    _actor_party(meeting, actor_user_id, actor_role)
     if meeting["status"] not in VALID_TRANSITIONS or "CANCELLED" not in VALID_TRANSITIONS[meeting["status"]]:
         raise MeetingError("This meeting cannot be cancelled from its current status.")
 
     reason = (reason or "").strip()
     if actor_role == "STUDENT":
-        student = queries.get_student_by_user_id(actor_user_id)
-        _require_student_owns_meeting(meeting, student["id"])
         if not reason:
             raise MeetingError("Please provide a reason for cancelling this meeting.")
         cancelled_by = "STUDENT"
         recipient_user_id = queries.get_faculty_by_id(meeting["faculty_id"])["user_id"]
     else:
-        faculty = queries.get_faculty_by_user_id(actor_user_id)
-        _require_faculty_owns_meeting(meeting, faculty["id"])
         cancelled_by = "FACULTY"
         recipient_user_id = queries.get_student_by_id(meeting["student_id"])["user_id"]
 
@@ -103,17 +116,14 @@ def complete_meeting(meeting_id, actor_user_id, actor_role):
     meeting = queries.get_meeting_by_id(meeting_id)
     if not meeting:
         raise MeetingError("Meeting request not found.")
+    _actor_party(meeting, actor_user_id, actor_role)
     if meeting["status"] != "ACCEPTED":
         raise MeetingError("Only an accepted meeting can be marked completed.")
 
     if actor_role == "STUDENT":
-        student = queries.get_student_by_user_id(actor_user_id)
-        _require_student_owns_meeting(meeting, student["id"])
         completed_by = "STUDENT"
         recipient_user_id = queries.get_faculty_by_id(meeting["faculty_id"])["user_id"]
     else:
-        faculty = queries.get_faculty_by_user_id(actor_user_id)
-        _require_faculty_owns_meeting(meeting, faculty["id"])
         completed_by = "FACULTY"
         recipient_user_id = queries.get_student_by_id(meeting["student_id"])["user_id"]
 
@@ -124,13 +134,24 @@ def complete_meeting(meeting_id, actor_user_id, actor_role):
     )
 
 
-def send_due_reminders(app):
-    """Called by the APScheduler job. Sends a reminder for every PENDING/ACCEPTED meeting
-    whose last reminder was sent more than REMINDER_INTERVAL_MINUTES ago (or never)."""
-    from datetime import datetime, timedelta
-    with app.app_context():
-        interval = timedelta(minutes=app.config["REMINDER_INTERVAL_MINUTES"])
-        cutoff = datetime.utcnow() - interval
+def send_due_reminders(app=None):
+    """Called by the APScheduler job (and tests). Sends a reminder for every PENDING/ACCEPTED meeting
+    whose last reminder was sent more than REMINDER_INTERVAL_MINUTES ago (or never).
+
+    Opens its own ``db_session`` unless one is already active. ``app`` (optional) may be the FastAPI
+    app or a Settings object; otherwise the current settings are used."""
+    import contextlib
+    from datetime import datetime, timedelta, timezone
+
+    from api import db as dbmod
+    from api.settings import Settings, get_settings
+
+    settings = getattr(getattr(app, "state", None), "settings", None) or (app if isinstance(app, Settings) else None)
+    settings = settings or get_settings()
+    ctx = contextlib.nullcontext() if dbmod.has_db_context() else dbmod.db_session(settings)
+    with ctx:
+        interval = timedelta(minutes=settings.reminder_interval_minutes)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - interval
         for meeting in queries.list_active_meetings_for_reminders():
             last = meeting["last_reminder_at"]
             # last_reminder_at is stored by SQLite as 'YYYY-MM-DD HH:MM:SS' (space, not 'T'),

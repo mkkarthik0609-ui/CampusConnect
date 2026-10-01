@@ -1,21 +1,40 @@
-"""Admin-controlled academic hierarchy: seed, validation, admin routes, student registration,
-'students cannot change class', admin remove-registration and legacy-data migration."""
+"""Admin-controlled academic hierarchy: seed, validation, the /api/admin academics + class-directory + student
+endpoints, student registration, 'students cannot change class', admin remove-registration and legacy-data
+migration."""
+import json
 import sqlite3
 
 import pytest
+from fastapi.testclient import TestClient
 
-from app import create_app
+from api.main import create_app
 from models import academic_queries as aq
 from models import queries
 from services import academic_service as svc
 from services.academic_service import AcademicError
 from tests.conftest import (
-    PASSWORD, make_config, create_admin, create_faculty, create_student, section_id_for, assign,
-    login_client, flashes, flash_text, db_one, db_all, db_count, db_exec, http_student_signup,
+    PASSWORD, make_settings, create_admin, create_faculty, create_student, section_id_for, assign,
+    login_client, api_post, api_delete, db_one, db_all, db_count, db_exec, http_student_signup,
 )
 
 DEPARTMENTS = ["AIML", "AIDE", "GenAI", "Cybersecurity", "Blockchain", "IoT"]
 YEARS = ["1st Year", "2nd Year", "3rd Year", "4th Year"]
+
+
+def public_tree(client):
+    resp = client.get("/api/academic/tree")
+    assert resp.status_code == 200
+    return resp.json()["branches"]
+
+
+def err(resp, status, code=None):
+    """Assert the conventions error shape and return the error object."""
+    assert resp.status_code == status, resp.text
+    body = resp.json()["error"]
+    if code:
+        assert body["code"] == code, body
+    assert body["message"]
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -47,9 +66,9 @@ def test_seed_is_idempotent_and_skipped_when_any_branch_exists(app):
         assert len(aq.list_branches()) == 1
 
 
-def test_seed_not_rerun_after_admin_deletes_everything(tmp_path):
+def test_seed_not_rerun_after_admin_deactivates_everything(tmp_path):
     """Once a branch exists the admin owns the structure; a restart must not resurrect defaults."""
-    cfg = make_config(tmp_path / "x.db", tmp_path / "up")
+    cfg = make_settings(tmp_path, database_path=str(tmp_path / "x.db"), upload_root=str(tmp_path / "up"))
     app1 = create_app(cfg)
     with app1.app_context():
         svc.set_active("branch", aq.get_branch_by_name("CSE")["id"], False)
@@ -59,21 +78,21 @@ def test_seed_not_rerun_after_admin_deletes_everything(tmp_path):
         assert aq.get_branch_by_name("CSE")["is_active"] == 0
 
 
-def test_tree_json_endpoint_matches_seed_and_is_public(client):
-    resp = client.get("/academic/tree.json")
+def test_public_tree_endpoint_matches_seed_and_is_anonymous(client):
+    resp = client.get("/api/academic/tree")  # no login
     assert resp.status_code == 200
-    tree = resp.get_json()
+    tree = resp.json()["branches"]
     assert [b["name"] for b in tree] == ["CSE"]
     depts = tree[0]["departments"]
     assert sorted(d["name"] for d in depts) == sorted(DEPARTMENTS)
     aiml = next(d for d in depts if d["name"] == "AIML")
     assert [y["name"] for y in aiml["years"]] == YEARS
     assert [s["name"] for s in aiml["years"][2]["sections"]] == ["A", "B", "C"]
-    assert {"id", "name", "is_active"} <= set(tree[0])
+    assert set(tree[0]) == {"id", "name", "departments"}  # public: ids + names only
 
 
 # ---------------------------------------------------------------------------
-# normalisation / validation
+# normalisation / validation (service level)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("raw,label,number", [
@@ -200,7 +219,7 @@ def test_add_sections_unknown_year(app):
 
 
 # ---------------------------------------------------------------------------
-# activation / deletion
+# activation / deletion (service level)
 # ---------------------------------------------------------------------------
 
 def _tree_names(app):
@@ -219,7 +238,7 @@ def test_deactivate_section_hides_it_from_tree_and_public_json(app, client):
         assert ("CSE", "AIML", "3rd Year", "A") in _tree_names(app)
         with pytest.raises(AcademicError):
             svc.resolve_section(sid)
-    data = client.get("/academic/tree.json").get_json()
+    data = public_tree(client)
     aiml = next(d for d in data[0]["departments"] if d["name"] == "AIML")
     assert [s["name"] for s in aiml["years"][2]["sections"]] == ["A", "C"]
     with app.app_context():
@@ -251,11 +270,13 @@ def test_deactivating_a_parent_hides_and_invalidates_all_children(app, level, pi
         assert svc.resolve_section(sid)
 
 
-def test_inactive_department_leaves_faculty_signup_and_department_list(app):
+def test_inactive_department_leaves_faculty_signup_and_department_list(app, client):
     with app.app_context():
         d = next(x for x in aq.list_departments() if x["name"] == "IoT")
         svc.set_active("department", d["id"], False)
         assert "IoT" not in aq.list_active_department_names()
+    assert "IoT" not in [x for x in client.get("/api/auth/faculty-departments").json()["items"]]
+    with app.app_context():
         svc.set_active("department", d["id"], True)
         assert "IoT" in aq.list_active_department_names()
 
@@ -332,204 +353,348 @@ def test_combo_label_and_lookup_helpers(app):
         assert len(rows) == 72 and all(r["student_count"] == 0 and r["faculty_count"] == 0 for r in rows)
 
 
-def test_list_combos_with_counts_counts_students_and_active_faculty(app):
+def test_list_combos_with_counts_counts_live_students_and_active_faculty(app, admin_client):
     admin_id = create_admin(app)
     sid = section_id_for(app)
     create_student(app, "1AB21CS011", sid)
     create_student(app, "1AB21CS012", sid)
+    gone = create_student(app, "1AB21CS013", sid)
     f1, f2 = create_faculty(app, "FAC060"), create_faculty(app, "FAC061")
     assign(app, f1, sid, admin_id)
     assign(app, f2, sid, admin_id)
+    assert api_post(admin_client, f"/api/admin/students/{gone['student_id']}/remove-registration").status_code == 200
     with app.app_context():
         aq.deactivate_assignment(aq.get_assignment_for(f2["faculty_id"], sid)["id"])
         row = next(r for r in aq.list_combos_with_counts() if r["section_id"] == sid)
-        assert (row["student_count"], row["faculty_count"]) == (2, 1)
+        assert (row["student_count"], row["faculty_count"]) == (2, 1)  # removed student and inactive faculty excluded
+
+
+def test_tree_with_usage_rolls_counts_up_and_flags_deletable_nodes(app):
+    admin_id = create_admin(app)
+    sid = section_id_for(app, "AIDE", "2nd Year", "A")
+    create_student(app, "1AB21CS014", sid)
+    assign(app, create_faculty(app, "FAC062"), sid, admin_id)
+    with app.app_context():
+        tree = svc.get_tree(active_only=False, with_usage=True)
+    branch = tree[0]
+    aide = next(d for d in branch["departments"] if d["name"] == "AIDE")
+    iot = next(d for d in branch["departments"] if d["name"] == "IoT")
+    year2 = next(y for y in aide["years"] if y["name"] == "2nd Year")
+    sec = next(s for s in year2["sections"] if s["name"] == "A")
+    assert (sec["student_count"], sec["assignment_count"], sec["can_delete"]) == (1, 1, False)
+    assert (year2["student_count"], year2["assignment_count"], year2["can_delete"]) == (1, 1, False)
+    assert (aide["student_count"], branch["student_count"], branch["can_delete"]) == (1, 1, False)
+    assert iot["can_delete"] and iot["student_count"] == 0
+    assert next(s for s in year2["sections"] if s["name"] == "B")["can_delete"] is True
 
 
 # ---------------------------------------------------------------------------
-# admin routes: authorisation
+# admin API: authorisation (anonymous 401, student/faculty 403, no side effects)
 # ---------------------------------------------------------------------------
 
-ADMIN_ACADEMIC_GETS = ["/admin/academics", "/admin/assignments", "/admin/assignment-requests",
-                       "/admin/classes", "/admin/classes/1"]
-ADMIN_ACADEMIC_POSTS = [
-    ("/admin/academics/branch", {"name": "Hack"}),
-    ("/admin/academics/department", {"branch_id": "1", "name": "Hack"}),
-    ("/admin/academics/year", {"department_id": "1", "name": "5"}),
-    ("/admin/academics/sections", {"year_id": "1", "names": "Z"}),
-    ("/admin/academics/section/1/active", {"active": "0"}),
-    ("/admin/academics/section/1/delete", {}),
-    ("/admin/assignments/assign", {"faculty_id": "1", "section_id": "1"}),
-    ("/admin/assignments/1/remove", {}),
-    ("/admin/assignment-requests/1/decide", {"decision": "approve"}),
-    ("/admin/students/1/remove-registration", {}),
+ADMIN_ACADEMIC_GETS = ["/api/admin/academics", "/api/admin/assignments", "/api/admin/assignment-requests",
+                       "/api/admin/classes", "/api/admin/classes/1"]
+ADMIN_ACADEMIC_WRITES = [
+    ("POST", "/api/admin/academics/branches", {"name": "Hack"}),
+    ("POST", "/api/admin/academics/departments", {"branch_id": 1, "name": "Hack"}),
+    ("POST", "/api/admin/academics/years", {"department_id": 1, "name": "5"}),
+    ("POST", "/api/admin/academics/sections", {"year_id": 1, "names": "Z"}),
+    ("POST", "/api/admin/academics/section/1/active", {"active": False}),
+    ("DELETE", "/api/admin/academics/section/1", None),
+    ("POST", "/api/admin/assignments", {"faculty_id": 1, "section_id": 1}),
+    ("DELETE", "/api/admin/assignments/1", None),
+    ("POST", "/api/admin/assignment-requests/1/decide", {"decision": "approve"}),
+    ("POST", "/api/admin/students/1/remove-registration", None),
 ]
 
 
 @pytest.mark.parametrize("path", ADMIN_ACADEMIC_GETS)
-def test_admin_get_pages_anonymous_redirected_non_admin_forbidden(app, path):
+def test_admin_get_endpoints_anonymous_401_non_admin_403(app, path):
     create_admin(app)
     fac = create_faculty(app, "FAC070")
     stu = create_student(app, "1AB21CS020")
-    anon = app.test_client()
-    resp = anon.get(path)
-    assert resp.status_code == 302 and "/login" in resp.headers["Location"]
+    err(TestClient(app).get(path), 401, "unauthenticated")
     for user in (fac, stu):
-        assert login_client(app, user["email"]).get(path).status_code == 403
+        err(login_client(app, user["email"]).get(path), 403, "forbidden")
 
 
-@pytest.mark.parametrize("path,data", ADMIN_ACADEMIC_POSTS)
-def test_admin_post_actions_anonymous_redirected_non_admin_forbidden_and_no_side_effects(app, path, data):
+@pytest.mark.parametrize("method,path,payload", ADMIN_ACADEMIC_WRITES)
+def test_admin_write_endpoints_reject_non_admins_and_have_no_side_effects(app, method, path, payload):
     create_admin(app)
     fac = create_faculty(app, "FAC071")
     stu = create_student(app, "1AB21CS021")
     snapshot = lambda: (db_count(app, "branches"), db_count(app, "departments"), db_count(app, "academic_years"),
-                        db_count(app, "sections", "is_active = 1"), db_count(app, "faculty_assignments"),
-                        db_count(app, "users", "is_active = 1"))
+                        db_count(app, "sections", "is_active = 1"), db_count(app, "sections"),
+                        db_count(app, "faculty_assignments"), db_count(app, "users", "is_active = 1"))
     before = snapshot()
-    resp = app.test_client().post(path, data=data)
-    assert resp.status_code == 302 and "/login" in resp.headers["Location"]
+    anonymous = TestClient(app)
+    err(anonymous.request(method, path, json=payload), 401, "unauthenticated")
+    # even a malformed body must not leak validation details to a non-admin
+    err(anonymous.request(method, path, json={"junk": 1}) if payload is not None else anonymous.request(method, path),
+        401, "unauthenticated")
     for user in (fac, stu):
-        assert login_client(app, user["email"]).post(path, data=data).status_code == 403
+        c = login_client(app, user["email"])
+        err(c.request(method, path, json=payload), 403, "forbidden")
     assert snapshot() == before
 
 
-def test_admin_pages_render_for_admin(app, admin_client):
+def test_admin_endpoints_work_for_admin(app, admin_client):
     for path in ADMIN_ACADEMIC_GETS[:-1]:
         assert admin_client.get(path).status_code == 200, path
     sid = section_id_for(app)
-    assert admin_client.get(f"/admin/classes/{sid}").status_code == 200
-    resp = admin_client.get("/admin/classes/99999")
-    assert resp.status_code == 302 and "/admin/classes" in resp.headers["Location"]
-    assert "not found" in flash_text(admin_client).lower()
+    assert admin_client.get(f"/api/admin/classes/{sid}").status_code == 200
+    err(admin_client.get("/api/admin/classes/99999"), 404, "not_found")
 
 
 # ---------------------------------------------------------------------------
-# admin routes: behaviour
+# admin API: academic structure
 # ---------------------------------------------------------------------------
 
-def test_admin_adds_full_chain_via_http(app, admin_client):
-    post = lambda path, **d: admin_client.post(path, data=d)
-    assert post("/admin/academics/branch", name="ECE").status_code == 302
-    assert "Branch added" in flash_text(admin_client)
-    bid = db_one(app, "SELECT id FROM branches WHERE name = 'ECE'")["id"]
+def test_admin_adds_full_chain_via_api(app, admin_client):
+    post = lambda path, **d: api_post(admin_client, "/api/admin/academics/" + path, json=d)
+    r = post("branches", name="ECE")
+    assert r.status_code == 201 and r.json()["ok"] and r.json()["message"] == "Branch added."
+    bid = r.json()["id"]
+    assert db_one(app, "SELECT name FROM branches WHERE id = ?", (bid,))["name"] == "ECE"
 
-    post("/admin/academics/department", branch_id=bid, name="VLSI")
-    assert "Department added" in flash_text(admin_client)
-    did = db_one(app, "SELECT id FROM departments WHERE name = 'VLSI'")["id"]
+    r = post("departments", branch_id=bid, name="VLSI")
+    assert r.status_code == 201 and r.json()["name"] == "VLSI"
+    did = r.json()["id"]
 
-    post("/admin/academics/year", department_id=did, name="2")
-    assert "year added" in flash_text(admin_client).lower()
-    yid = db_one(app, "SELECT id FROM academic_years WHERE department_id = ?", (did,))["id"]
-    assert db_one(app, "SELECT name FROM academic_years WHERE id = ?", (yid,))["name"] == "2nd Year"
+    r = post("years", department_id=did, name="2")
+    assert r.status_code == 201 and r.json()["name"] == "2nd Year"
+    yid = r.json()["id"]
+    assert db_one(app, "SELECT sort_order FROM academic_years WHERE id = ?", (yid,))["sort_order"] == 2
 
-    post("/admin/academics/sections", year_id=yid, names="A, B")
-    assert [r["name"] for r in db_all(app, "SELECT name FROM sections WHERE academic_year_id = ?", (yid,))] == ["A", "B"]
+    r = post("sections", year_id=yid, names="A, b")
+    assert r.status_code == 201 and r.json()["created"] == ["A", "B"]
+    assert [x["name"] for x in db_all(app, "SELECT name FROM sections WHERE academic_year_id = ?", (yid,))] == ["A", "B"]
 
-    # the new class is immediately selectable on the public tree
-    names = [b["name"] for b in app.test_client().get("/academic/tree.json").get_json()]
-    assert "ECE" in names
+    # the new class is immediately selectable on the public tree (no login) and visible in the admin tree
+    assert "ECE" in [b["name"] for b in public_tree(TestClient(app))]
+    admin_tree = admin_client.get("/api/admin/academics").json()["branches"]
+    ece = next(b for b in admin_tree if b["name"] == "ECE")
+    assert ece["can_delete"] is True and ece["departments"][0]["years"][0]["sections"][1]["name"] == "B"
 
 
-@pytest.mark.parametrize("path,data,needle", [
-    ("/admin/academics/branch", {"name": "CSE"}, "already exists"),
-    ("/admin/academics/branch", {"name": ""}, "name must be"),
-    ("/admin/academics/department", {"branch_id": "1", "name": "AIML"}, "already exists"),
-    ("/admin/academics/department", {"branch_id": "abc", "name": "X"}, "Branch not found"),
-    ("/admin/academics/year", {"department_id": "1", "name": "3"}, "already exists"),
-    ("/admin/academics/year", {"department_id": "1", "name": "Final"}, "Year must look like"),
-    ("/admin/academics/sections", {"year_id": "1", "names": "3A"}, "single letter"),
-    ("/admin/academics/sections", {"year_id": "1", "names": "A B C"}, "already exist"),
-    ("/admin/academics/sections", {"year_id": "", "names": "Z"}, "Year not found"),
-    ("/admin/academics/galaxy/1/active", {"active": "0"}, "not found"),
-    ("/admin/academics/section/99999/delete", {}, "not found"),
+@pytest.mark.parametrize("path,payload,status,code,field,needle", [
+    ("branches", {"name": "CSE"}, 409, "conflict", "name", "already exists"),
+    ("branches", {"name": "cse "}, 409, "conflict", "name", "already exists"),
+    ("branches", {"name": ""}, 400, "validation_error", "name", "name must be"),
+    ("branches", {"name": "Bad;Name"}, 400, "validation_error", "name", "name must be"),
+    ("branches", {"name": 5}, 400, "validation_error", "name", ""),
+    ("branches", {}, 400, "validation_error", "name", "required"),
+    ("branches", {"name": "X", "is_active": True}, 400, "validation_error", "is_active", ""),
+    ("departments", {"branch_id": 1, "name": "AIML"}, 409, "conflict", "name", "already exists"),
+    ("departments", {"branch_id": 99999, "name": "X"}, 404, "not_found", None, "Branch not found"),
+    ("departments", {"branch_id": "abc", "name": "X"}, 400, "validation_error", "branch_id", ""),
+    ("departments", {"branch_id": 1.5, "name": "X"}, 400, "validation_error", "branch_id", ""),
+    ("departments", {"branch_id": True, "name": "X"}, 400, "validation_error", "branch_id", ""),
+    ("years", {"department_id": 1, "name": "3"}, 409, "conflict", "name", "already exists"),
+    ("years", {"department_id": 1, "name": "Final"}, 400, "validation_error", "name", "Year must look like"),
+    ("years", {"department_id": 99999, "name": "1"}, 404, "not_found", None, "Department not found"),
+    ("sections", {"year_id": 1, "names": "3A"}, 400, "validation_error", "names", "single letter"),
+    ("sections", {"year_id": 1, "names": "A, B, 3C"}, 400, "validation_error", "names", "single letter"),
+    ("sections", {"year_id": 1, "names": "A B C"}, 409, "conflict", "names", "already exist"),
+    ("sections", {"year_id": 1, "names": "  "}, 400, "validation_error", "names", "at least one"),
+    ("sections", {"year_id": 99999, "names": "Z"}, 404, "not_found", None, "Year not found"),
+    ("sections", {"year_id": None, "names": "Z"}, 400, "validation_error", "year_id", ""),
+    ("galaxy/1/active", {"active": False}, 404, "not_found", None, "not found"),
+    ("section/99999/active", {"active": False}, 404, "not_found", None, "not found"),
+    ("section/1/active", {"active": "no"}, 400, "validation_error", "active", ""),
+    ("section/1/active", {"active": 0}, 400, "validation_error", "active", ""),
+    ("section/1/active", {}, 400, "validation_error", "active", ""),
 ])
-def test_admin_structure_errors_are_flashed_not_crashes(app, admin_client, path, data, needle):
-    before = db_count(app, "sections")
-    resp = admin_client.post(path, data=data)
-    assert resp.status_code == 302
-    cats = flashes(admin_client)
-    assert cats and cats[0][0] == "error" and needle.lower() in cats[0][1].lower(), cats
-    assert db_count(app, "sections") == before
+def test_admin_structure_errors_use_the_error_shape_and_change_nothing(app, admin_client, path, payload, status,
+                                                                       code, field, needle):
+    counts = lambda: (db_count(app, "sections"), db_count(app, "branches"), db_count(app, "departments"),
+                      db_count(app, "academic_years"), db_count(app, "sections", "is_active = 1"))
+    before = counts()
+    resp = api_post(admin_client, "/api/admin/academics/" + path, json=payload)
+    body = err(resp, status, code)
+    assert needle.lower() in body["message"].lower() or needle.lower() in json.dumps(body).lower(), body
+    if field:
+        assert field in body["fields"], body
+    assert counts() == before
 
 
-def test_admin_deactivate_reactivate_and_delete_via_http(app, admin_client):
+def test_admin_structure_rejects_non_json_bodies(app, admin_client):
+    for content in ("not json", "[1,2]", ""):
+        resp = admin_client.post("/api/admin/academics/branches", content=content,
+                                 headers={"Content-Type": "application/json", "X-CSRFToken": "x"})
+        assert resp.status_code == 400 and "code" in resp.json()["error"]
+    assert db_count(app, "branches") == 1
+
+
+def test_admin_deactivate_reactivate_and_delete_via_api(app, admin_client):
     sid = section_id_for(app, "IoT", "4th Year", "C")
-    admin_client.post(f"/admin/academics/section/{sid}/active", data={"active": "0"})
+    r = api_post(admin_client, f"/api/admin/academics/section/{sid}/active", json={"active": False})
+    assert r.status_code == 200 and r.json()["is_active"] is False and "deactivated" in r.json()["message"]
     assert db_one(app, "SELECT is_active FROM sections WHERE id = ?", (sid,))["is_active"] == 0
-    tree = app.test_client().get("/academic/tree.json").get_json()
-    iot = next(d for d in tree[0]["departments"] if d["name"] == "IoT")
+    iot = next(d for d in public_tree(TestClient(app))[0]["departments"] if d["name"] == "IoT")
     assert [s["name"] for s in iot["years"][3]["sections"]] == ["A", "B"]
+    # the admin tree still lists it, flagged inactive
+    admin_iot = next(d for d in admin_client.get("/api/admin/academics").json()["branches"][0]["departments"]
+                     if d["name"] == "IoT")
+    node = next(s for s in admin_iot["years"][3]["sections"] if s["id"] == sid)
+    assert node["is_active"] is False and node["can_delete"] is True
 
-    admin_client.post(f"/admin/academics/section/{sid}/active", data={"active": "1"})
+    r = api_post(admin_client, f"/api/admin/academics/section/{sid}/active", json={"active": True})
+    assert r.status_code == 200 and "reactivated" in r.json()["message"]
     assert db_one(app, "SELECT is_active FROM sections WHERE id = ?", (sid,))["is_active"] == 1
 
-    admin_client.post(f"/admin/academics/section/{sid}/delete")
+    r = api_delete(admin_client, f"/api/admin/academics/section/{sid}")
+    assert r.status_code == 200 and "deleted" in r.json()["message"].lower()
     assert db_one(app, "SELECT id FROM sections WHERE id = ?", (sid,)) is None
-    assert "deleted" in flash_text(admin_client).lower()
+    err(api_delete(admin_client, f"/api/admin/academics/section/{sid}"), 404, "not_found")  # already gone
 
-    # deleting a section that has a student is refused
+    # deleting anything that is in use is refused at every level, and nothing is lost
     used = section_id_for(app, "IoT", "4th Year", "A")
     create_student(app, "1AB21CS030", used)
-    admin_client.post(f"/admin/academics/section/{used}/delete")
+    combo = db_one(app, "SELECT y.id AS y, d.id AS d, b.id AS b FROM sections s JOIN academic_years y ON "
+                        "y.id = s.academic_year_id JOIN departments d ON d.id = y.department_id JOIN branches b "
+                        "ON b.id = d.branch_id WHERE s.id = ?", (used,))
+    for level, row_id in (("section", used), ("year", combo["y"]), ("department", combo["d"]),
+                          ("branch", combo["b"])):
+        body = err(api_delete(admin_client, f"/api/admin/academics/{level}/{row_id}"), 409, "in_use")
+        assert "deactivate it instead" in body["message"]
     assert db_one(app, "SELECT id FROM sections WHERE id = ?", (used,)) is not None
-    assert "deactivate it instead" in flash_text(admin_client)
+    assert db_count(app, "branches") == 1
+
+
+def test_deleting_a_section_with_only_an_assignment_is_refused_via_api(app, admin_client):
+    admin_id = create_admin(app)
+    sid = section_id_for(app, "GenAI", "2nd Year", "B")
+    assign(app, create_faculty(app, "FAC072"), sid, admin_id)
+    body = err(api_delete(admin_client, f"/api/admin/academics/section/{sid}"), 409, "in_use")
+    assert "faculty assignments" in body["message"]
+
+
+def test_admin_tree_endpoint_returns_inactive_rows_and_usage(app, admin_client):
+    sid = section_id_for(app, "AIML", "3rd Year", "B")
+    create_student(app, "1AB21CS031", sid)
+    api_post(admin_client, f"/api/admin/academics/section/{sid}/active", json={"active": False})
+    branches = admin_client.get("/api/admin/academics").json()["branches"]
+    aiml = next(d for d in branches[0]["departments"] if d["name"] == "AIML")
+    year3 = next(y for y in aiml["years"] if y["name"] == "3rd Year")
+    b = next(s for s in year3["sections"] if s["name"] == "B")
+    assert b == {"id": sid, "name": "B", "is_active": False, "student_count": 1, "assignment_count": 0,
+                 "can_delete": False}
+    assert year3["student_count"] == 1 and year3["is_active"] is True
+    assert [s["name"] for s in year3["sections"]] == ["A", "B", "C"]  # public tree would hide B
 
 
 # ---------------------------------------------------------------------------
-# student registration (HTTP and service)
+# admin API: class directory
 # ---------------------------------------------------------------------------
 
-def test_registration_with_valid_section_id_stores_text_and_link(app, client, captured_otps):
+def test_class_directory_list_and_detail(app, admin_client):
+    admin_id = create_admin(app)
+    sid = section_id_for(app)
+    s1, s2 = create_student(app, "1AB21CS040", sid), create_student(app, "1AB21CS041", sid)
+    fac = create_faculty(app, "FAC073", name="Dr Directory")
+    assign(app, fac, sid, admin_id)
+
+    items = admin_client.get("/api/admin/classes").json()
+    assert items["total"] == 72 and len(items["items"]) == 72
+    row = next(c for c in items["items"] if c["section_id"] == sid)
+    assert row == {
+        "section_id": sid, "branch": "CSE", "department": "AIML", "year": "3rd Year", "section": "A",
+        "label": "CSE → AIML → 3rd Year → A", "is_active": True, "student_count": 2, "faculty_count": 1,
+        "faculty": [{"id": fac["faculty_id"], "assignment_id": row["faculty"][0]["assignment_id"],
+                     "faculty_code": "FAC073", "full_name": "Dr Directory", "profile_picture_url": None}],
+    }
+    empty = next(c for c in items["items"] if c["section_id"] != sid)
+    assert empty["student_count"] == 0 and empty["faculty"] == []
+
+    detail = admin_client.get(f"/api/admin/classes/{sid}").json()
+    assert detail["class"]["student_count"] == 2 and detail["class"]["faculty_count"] == 1
+    assert [f["faculty_code"] for f in detail["faculty"]] == ["FAC073"]
+    assert [s["usn"] for s in detail["students"]] == ["1AB21CS040", "1AB21CS041"]
+    assert {"id", "full_name", "usn", "email", "phone", "profile_picture_url", "class", "is_removed", "is_active",
+            "can_remove_registration"} <= set(detail["students"][0])
+    assert detail["students"][0]["class"]["section_id"] == sid
+
+
+def test_class_detail_marks_removed_students_and_hides_inactive_assignments(app, admin_client):
+    admin_id = create_admin(app)
+    sid = section_id_for(app)
+    gone, kept = create_student(app, "1AB21CS042", sid), create_student(app, "1AB21CS043", sid)
+    fac = create_faculty(app, "FAC074")
+    assign(app, fac, sid, admin_id)
+    api_post(admin_client, f"/api/admin/students/{gone['student_id']}/remove-registration")
+    with app.app_context():
+        aq.deactivate_assignment(aq.get_assignment_for(fac["faculty_id"], sid)["id"])
+    detail = admin_client.get(f"/api/admin/classes/{sid}").json()
+    assert detail["faculty"] == [] and detail["class"]["faculty_count"] == 0
+    by_usn = {s["usn"]: s for s in detail["students"]}
+    assert set(by_usn) == {"1AB21CS042", "1AB21CS043"}  # tombstone stripped from the shown USN
+    assert by_usn["1AB21CS042"]["is_removed"] is True and by_usn["1AB21CS042"]["is_active"] is False
+    assert by_usn["1AB21CS042"]["can_remove_registration"] is False
+    assert by_usn["1AB21CS043"]["is_removed"] is False
+    assert detail["class"]["student_count"] == 1  # removed registrations do not count
+    assert kept["email"] == by_usn["1AB21CS043"]["email"]
+
+
+# ---------------------------------------------------------------------------
+# student registration (HTTP signup + service)
+# ---------------------------------------------------------------------------
+
+def test_registration_with_valid_section_id_stores_text_and_link(app, client):
     sid = section_id_for(app, "AIDE", "2nd Year", "B")
-    resp = http_student_signup(client, captured_otps, "reg1@college.edu", "1AB21CS100", sid)
-    assert resp.status_code == 302
+    resp = http_student_signup(client, None, "reg1@college.edu", "1AB21CS100", sid)
+    assert resp.status_code == 201, resp.text
     st = db_one(app, "SELECT * FROM students WHERE usn = '1AB21CS100'")
     assert st["section_id"] == sid
     assert (st["branch"], st["department"], st["year"], st["section"]) == ("CSE", "AIDE", "2nd Year", "B")
     assert st["college_email"] == "reg1@college.edu"
 
 
-@pytest.mark.parametrize("bad", ["", "abc", "999999", "-5", "0", "1; DROP TABLE students", "1 OR 1=1"])
-def test_registration_rejects_invalid_or_forged_section_ids(app, client, captured_otps, bad):
-    http_student_signup(client, captured_otps, "reg2@college.edu", "1AB21CS101", bad)
+@pytest.mark.parametrize("bad", ["", "abc", 999999, -5, 0, "1; DROP TABLE students", "1 OR 1=1", 1.5, None,
+                                 [1], {"a": 1}])
+def test_registration_rejects_invalid_or_forged_section_ids(app, client, bad):
+    resp = http_student_signup(client, None, "reg2@college.edu", "1AB21CS101", bad)
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"]["code"] == "validation_error"
     assert db_count(app, "students") == 0
     assert db_count(app, "users") == 0
 
 
-def test_registration_rejects_missing_section_id_field(app, client, captured_otps):
-    client.post("/signup/student", data={"college_email": "reg3@college.edu"})
-    client.post("/signup/student/verify-otp", data={"email": "reg3@college.edu", "otp": captured_otps["reg3@college.edu"]})
-    resp = client.post("/signup/student/details?email=reg3@college.edu", data={
-        "college_email": "reg3@college.edu", "full_name": "N", "usn": "1AB21CS102", "phone": "9999999999",
-        "personal_email": "n@example.com", "password": PASSWORD, "confirm_password": PASSWORD,
-        "branch": "CSE", "department": "AIML", "year": "3rd Year", "section": "A",
-    })
-    assert resp.status_code == 200  # form re-rendered, nothing created
+def test_registration_rejects_missing_section_id_field(app, client):
+    email = "reg3@college.edu"
+    otp = api_post(client, "/api/auth/signup/student/start", json={"college_email": email}).json()["demo_otp"]
+    assert api_post(client, "/api/auth/signup/student/verify", json={"college_email": email, "otp": otp}).status_code == 200
+    resp = api_post(client, "/api/auth/signup/student/register", json={
+        "college_email": email, "full_name": "N", "usn": "1AB21CS102", "phone": "9999999999",
+        "personal_email": "n@example.com", "password": PASSWORD, "confirm_password": PASSWORD})
+    body = err(resp, 400, "validation_error")
+    assert "section_id" in body["fields"]
     assert db_count(app, "students") == 0
 
 
 @pytest.mark.parametrize("level", ["section", "year", "department", "branch"])
-def test_registration_rejects_inactive_chain_at_any_level(app, client, captured_otps, level):
+def test_registration_rejects_inactive_chain_at_any_level(app, client, level):
     sid = section_id_for(app, "GenAI", "1st Year", "A")
     with app.app_context():
         combo = aq.get_combo(sid)
         svc.set_active(level, combo[f"{level}_id"], False)
-    http_student_signup(client, captured_otps, "reg4@college.edu", "1AB21CS103", sid)
+    resp = http_student_signup(client, None, "reg4@college.edu", "1AB21CS103", sid)
+    assert resp.status_code == 400
     assert db_count(app, "students") == 0
 
 
-def test_free_text_class_fields_are_ignored_in_favour_of_section_id(app, client, captured_otps):
+def test_free_text_class_fields_are_rejected_not_trusted(app, client):
+    """The register body is strict: class names typed by the client are an error, only section_id counts."""
     sid = section_id_for(app, "AIML", "3rd Year", "A")
-    http_student_signup(client, captured_otps, "reg5@college.edu", "1AB21CS104", sid, extra={
+    resp = http_student_signup(client, None, "reg5@college.edu", "1AB21CS104", sid, extra={
         "branch": "ECE", "department": "Hacking", "year": "9th Year", "section": "Z",
     })
-    st = db_one(app, "SELECT * FROM students WHERE usn = '1AB21CS104'")
-    assert (st["branch"], st["department"], st["year"], st["section"]) == ("CSE", "AIML", "3rd Year", "A")
-    assert st["section_id"] == sid
+    body = err(resp, 400, "validation_error")
+    assert {"branch", "department", "year", "section"} <= set(body["fields"])
+    assert db_count(app, "students") == 0
 
 
-def test_free_text_only_registration_is_rejected(app):
+def test_free_text_only_registration_is_rejected_by_the_service(app):
     with app.app_context():
         from services import auth_service
         with pytest.raises(auth_service.ValidationError):
@@ -540,15 +705,12 @@ def test_free_text_only_registration_is_rejected(app):
     assert db_count(app, "students") == 0
 
 
-def test_student_dashboard_lists_faculty_assigned_to_their_section(app):
+def test_registered_student_is_linked_to_faculty_assigned_to_their_section(app):
     admin_id = create_admin(app)
     sid = section_id_for(app)
     stu = create_student(app, "1AB21CS106", sid)
     fac = create_faculty(app, "FAC080", name="Dr Visible")
     assign(app, fac, sid, admin_id)
-    c = login_client(app, stu["email"])
-    resp = c.get("/student/dashboard")
-    assert resp.status_code == 200 and b"Dr Visible" in resp.data
     with app.app_context():
         assert [f["faculty_code"] for f in aq.list_assigned_faculty_for_student(stu["student_id"])] == ["FAC080"]
 
@@ -566,35 +728,31 @@ def _student_with_faculty(app):
     return stu, fac, sid
 
 
-def test_profile_change_ignores_class_fields_entirely(app):
+def test_profile_change_service_ignores_class_fields_entirely(app):
+    from services import permission_service
     stu, fac, sid = _student_with_faculty(app)
-    c = login_client(app, stu["email"])
-    resp = c.post("/student/profile/change-request", data={
-        "branch": "ECE", "department": "AIDE", "year": "4th Year", "section": "C", "section_id": "5",
-        "reason": "moving",
-    })
-    assert resp.status_code == 302
-    assert "No valid profile fields" in flash_text(c)
+    with app.app_context():
+        with pytest.raises(permission_service.PermissionError_, match="No valid profile fields"):
+            permission_service.student_request_profile_change(stu["user_id"], {
+                "branch": "ECE", "department": "AIDE", "year": "4th Year", "section": "C", "section_id": "5"},
+                "moving")
     assert db_count(app, "permission_requests") == 0
     st = db_one(app, "SELECT * FROM students WHERE id = ?", (stu["student_id"],))
     assert (st["department"], st["year"], st["section"], st["section_id"]) == ("AIML", "3rd Year", "A", sid)
 
 
 def test_profile_change_with_class_and_phone_only_keeps_phone_in_request(app):
-    import json
+    from services import permission_service
     stu, fac, sid = _student_with_faculty(app)
-    c = login_client(app, stu["email"])
-    c.post("/student/profile/change-request", data={
-        "phone": "8888888888", "section": "C", "year": "1st Year", "branch": "ECE", "department": "IoT",
-        "section_id": "7", "usn": "HACKED", "college_email": "h@x.com", "class_faculty_id": "1",
-    })
+    with app.app_context():
+        permission_service.student_request_profile_change(stu["user_id"], {
+            "phone": "8888888888", "section": "C", "year": "1st Year", "branch": "ECE", "department": "IoT",
+            "section_id": "7", "usn": "HACKED", "college_email": "h@x.com", "class_faculty_id": "1"})
     req = db_one(app, "SELECT * FROM permission_requests")
     assert json.loads(req["requested_changes"]) == {"phone": "8888888888"}
 
 
-def test_approved_profile_change_cannot_alter_class_even_if_row_was_forged(app):
-    """Defence in depth: even a forged pending request containing class fields applies... only what the
-    service-layer filter allowed at creation; verify the service filter itself."""
+def test_student_editable_fields_never_include_class_or_identity():
     from services import permission_service
     assert permission_service.STUDENT_EDITABLE_FIELDS == {"phone", "personal_email"}
     for f in ("branch", "department", "year", "section", "section_id", "usn"):
@@ -602,31 +760,31 @@ def test_approved_profile_change_cannot_alter_class_even_if_row_was_forged(app):
 
 
 def test_no_student_route_changes_section(app):
-    """No URL rule exposes a way for a student to move to another section."""
-    rules = [(r.rule, sorted(r.methods - {"HEAD", "OPTIONS"})) for r in app.url_map.iter_rules()]
-    student_rules = [r for r, _ in rules if r.startswith("/student")]
-    assert sorted(student_rules) == sorted([
-        "/student/dashboard", "/student/profile", "/student/profile/picture",
-        "/student/profile/change-request", "/student/theme/<theme>",
-    ])
+    """No unsafe route under /api/student, /api/account or /api/auth can move a student to another section."""
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        methods = getattr(route, "methods", None) or set()
+        if not (path.startswith(("/api/student", "/api/account")) and methods - {"GET", "HEAD", "OPTIONS"}):
+            continue
+        assert "section" not in path and "class" not in path, path
     stu, fac, sid = _student_with_faculty(app)
     c = login_client(app, stu["email"])
-    for path in ("/student/profile/section", "/student/section", "/student/class", "/student/profile/class",
-                 "/student/change-section", "/academic/select"):
-        for method in (c.get, c.post):
-            assert method(path, data={"section_id": "3"}).status_code in (404, 405), path
+    for path in ("/api/student/section", "/api/student/class", "/api/student/profile/section",
+                 "/api/student/profile/class", "/api/student/change-section", "/api/academic/select"):
+        for send in (c.post, c.put, c.patch):
+            assert send(path, json={"section_id": 3}).status_code in (404, 405), path
     assert db_one(app, "SELECT section_id FROM students WHERE id = ?", (stu["student_id"],))["section_id"] == sid
 
 
 def test_student_cannot_hit_admin_remove_registration_on_self(app):
     stu, fac, sid = _student_with_faculty(app)
     c = login_client(app, stu["email"])
-    assert c.post(f"/admin/students/{stu['student_id']}/remove-registration").status_code == 403
+    err(api_post(c, f"/api/admin/students/{stu['student_id']}/remove-registration"), 403, "forbidden")
     assert db_one(app, "SELECT is_active FROM users WHERE id = ?", (stu["user_id"],))["is_active"] == 1
 
 
 # ---------------------------------------------------------------------------
-# admin removes registration
+# admin removes a registration
 # ---------------------------------------------------------------------------
 
 def _seed_history(app, stu, fac):
@@ -648,17 +806,22 @@ def _seed_history(app, stu, fac):
 def test_remove_registration_blocks_login_keeps_history_and_frees_identifiers(app, admin_client):
     stu, fac, sid = _student_with_faculty(app)
     chat_id, m_open, m_acc, m_done = _seed_history(app, stu, fac)
-    assert login_client(app, stu["email"]).get("/student/dashboard").status_code == 200
+    student_client = login_client(app, stu["email"])
+    assert student_client.get("/api/auth/session").json()["authenticated"] is True
 
-    resp = admin_client.post(f"/admin/students/{stu['student_id']}/remove-registration")
-    assert resp.status_code == 302 and "/admin/students" in resp.headers["Location"]
-    assert "removed" in flash_text(admin_client).lower()
+    resp = api_post(admin_client, f"/api/admin/students/{stu['student_id']}/remove-registration")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True and "removed" in data["message"].lower() and stu["usn"] in data["message"]
+    assert data["student"]["is_removed"] is True and data["student"]["usn"] == stu["usn"]
 
-    # cannot log in any more (email or USN)
-    c = app.test_client()
+    # the live session is cut off, and nobody can sign in with the old e-mail or USN any more
+    assert student_client.get("/api/auth/session").json()["authenticated"] is False
+    anon = TestClient(app)
     for ident in (stu["email"], stu["usn"], stu["usn"].lower()):
-        r = c.post("/login", data={"email": ident, "password": PASSWORD})
-        assert r.status_code == 200 and c.get("/student/dashboard").status_code == 302
+        r = api_post(anon, "/api/auth/login", json={"identifier": ident, "password": PASSWORD})
+        assert r.status_code == 401, ident
+    assert anon.get("/api/auth/session").json()["authenticated"] is False
 
     user = db_one(app, "SELECT * FROM users WHERE id = ?", (stu["user_id"],))
     assert user["is_active"] == 0 and user["email"] != stu["email"]
@@ -666,7 +829,7 @@ def test_remove_registration_blocks_login_keeps_history_and_frees_identifiers(ap
     assert st["usn"] != stu["usn"] and st["college_email"] != stu["email"]
 
     # history is preserved
-    assert db_one(app, "SELECT COUNT(*) AS c FROM chats WHERE id = ?", (chat_id,))["c"] == 1
+    assert db_count(app, "chats", "id = ?", (chat_id,)) == 1
     assert db_count(app, "messages", "chat_id = ?", (chat_id,)) == 2
     assert db_count(app, "meeting_requests", "student_id = ?", (stu["student_id"],)) == 3
     status = {r["id"]: r["status"] for r in db_all(app, "SELECT id, status FROM meeting_requests")}
@@ -675,17 +838,19 @@ def test_remove_registration_blocks_login_keeps_history_and_frees_identifiers(ap
     assert db_one(app, "SELECT cancelled_by FROM meeting_requests WHERE id = ?", (m_open,))["cancelled_by"] == "FACULTY"
     # notifications are kept too
     assert db_count(app, "notifications", "user_id = ?", (stu["user_id"],)) >= 1
+    # ... and the admin can still read the conversation
+    assert admin_client.get(f"/api/admin/chats/{chat_id}").json()["chat"]["message_count"] == 2
 
 
-def test_removed_student_can_register_again_with_same_email_and_usn_and_other_class(app, admin_client, captured_otps):
+def test_removed_student_can_register_again_with_same_email_and_usn_and_other_class(app, admin_client):
     stu, fac, sid = _student_with_faculty(app)
     _seed_history(app, stu, fac)
-    admin_client.post(f"/admin/students/{stu['student_id']}/remove-registration")
+    api_post(admin_client, f"/api/admin/students/{stu['student_id']}/remove-registration")
 
     new_sid = section_id_for(app, "AIDE", "2nd Year", "C")
-    c = app.test_client()
-    resp = http_student_signup(c, captured_otps, stu["email"], stu["usn"], new_sid, full_name="Same Person")
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/login")
+    c = TestClient(app)
+    resp = http_student_signup(c, None, stu["email"], stu["usn"], new_sid, full_name="Same Person")
+    assert resp.status_code == 201, resp.text
 
     new = db_one(app, "SELECT st.*, u.is_active, u.id AS uid FROM students st JOIN users u ON u.id = st.user_id "
                       "WHERE st.usn = ?", (stu["usn"],))
@@ -693,29 +858,46 @@ def test_removed_student_can_register_again_with_same_email_and_usn_and_other_cl
     assert new["uid"] != stu["user_id"] and new["id"] != stu["student_id"] and new["is_active"] == 1
 
     # the new account logs in; the old tombstoned rows still exist (history preserved)
-    assert login_client(app, stu["email"]).get("/student/dashboard").status_code == 200
+    assert login_client(app, stu["email"]).get("/api/auth/session").json()["authenticated"] is True
     assert db_count(app, "students") == 2 and db_count(app, "users", "role = 'STUDENT'") == 2
     assert db_count(app, "messages") == 2
     # the old faculty (AIML 3rd A) cannot reach the re-registered student (now AIDE 2nd C)
     with app.app_context():
         assert not queries.is_faculty_accessible_to_student(new["id"], fac["faculty_id"])
+    # the admin list shows both: one removed, one live, with the same displayed USN / e-mail
+    rows = [s for s in admin_client.get("/api/admin/students").json()["items"] if s["usn"] == stu["usn"]]
+    assert sorted(r["is_removed"] for r in rows) == [False, True]
+    assert {r["email"] for r in rows} == {stu["email"]}
 
 
-def test_remove_registration_twice_and_unknown_student(app, admin_client):
+def test_remove_registration_is_idempotent_and_never_tombstones_twice(app, admin_client):
     stu, fac, sid = _student_with_faculty(app)
-    assert admin_client.post(f"/admin/students/{stu['student_id']}/remove-registration").status_code == 302
-    flashes(admin_client)
-    assert admin_client.post(f"/admin/students/{stu['student_id']}/remove-registration").status_code == 302
-    assert "already removed" in flash_text(admin_client)
-    st = db_one(app, "SELECT usn FROM students WHERE id = ?", (stu["student_id"],))
-    assert st["usn"].count("~removed-") == 1  # tombstoned exactly once
-    admin_client.post("/admin/students/99999/remove-registration")
-    assert "not found" in flash_text(admin_client).lower()
+    url = f"/api/admin/students/{stu['student_id']}/remove-registration"
+    assert api_post(admin_client, url).status_code == 200
+    snapshot = (db_one(app, "SELECT usn, college_email, updated_at FROM students WHERE id = ?", (stu["student_id"],)),
+                db_one(app, "SELECT email FROM users WHERE id = ?", (stu["user_id"],)))
+    for _ in range(3):
+        body = err(api_post(admin_client, url), 409, "already_removed")
+        assert "already removed" in body["message"]
+    after = (db_one(app, "SELECT usn, college_email, updated_at FROM students WHERE id = ?", (stu["student_id"],)),
+             db_one(app, "SELECT email FROM users WHERE id = ?", (stu["user_id"],)))
+    assert after == snapshot
+    assert db_one(app, "SELECT usn FROM students WHERE id = ?", (stu["student_id"],))["usn"].count("~removed-") == 1
+    assert db_one(app, "SELECT college_email FROM students WHERE id = ?", (stu["student_id"],))[
+        "college_email"].count("removed-") == 1
+    # unknown / malformed ids
+    err(api_post(admin_client, "/api/admin/students/99999/remove-registration"), 404, "not_found")
+    err(api_post(admin_client, "/api/admin/students/abc/remove-registration"), 400, "validation_error")
 
 
-def test_archive_student_registration_unknown_id_returns_false(app):
+def test_archive_student_registration_query_is_a_noop_the_second_time(app):
+    stu, fac, sid = _student_with_faculty(app)
     with app.app_context():
-        assert aq.archive_student_registration(424242) is False
+        assert aq.archive_student_registration(424242) is False  # unknown id
+        assert aq.archive_student_registration(stu["student_id"]) is True
+        first = dict(queries.get_student_by_id(stu["student_id"]))
+        assert aq.archive_student_registration(stu["student_id"]) is False
+        assert dict(queries.get_student_by_id(stu["student_id"])) == first
 
 
 def test_remove_registration_drops_pending_supporting_requests(app, admin_client):
@@ -725,28 +907,48 @@ def test_remove_registration_drops_pending_supporting_requests(app, admin_client
     with app.app_context():
         supporting_service.student_request_faculty(stu["student_id"], other["faculty_id"])
     assert db_count(app, "supporting_relationships") == 1
-    admin_client.post(f"/admin/students/{stu['student_id']}/remove-registration")
+    api_post(admin_client, f"/api/admin/students/{stu['student_id']}/remove-registration")
     assert db_count(app, "supporting_relationships") == 0
 
 
 def test_removed_student_not_listed_in_class_views_and_search(app, admin_client):
     stu, fac, sid = _student_with_faculty(app)
-    admin_client.post(f"/admin/students/{stu['student_id']}/remove-registration")
+    api_post(admin_client, f"/api/admin/students/{stu['student_id']}/remove-registration")
     with app.app_context():
         assert aq.list_students_for_section(sid) == []
         assert aq.search_students_in_faculty_scope(fac["faculty_id"], "1AB21CS200") == []
         assert aq.list_assignments_for_faculty(fac["faculty_id"])[0]["student_count"] == 0
 
 
-def test_admin_students_page_lists_removed_students_as_inactive(app, admin_client):
+def test_admin_students_list_shape_filters_and_removed_flag(app, admin_client):
     stu, fac, sid = _student_with_faculty(app)
-    admin_client.post(f"/admin/students/{stu['student_id']}/remove-registration")
-    assert admin_client.get("/admin/students").status_code == 200
-    with app.app_context():
-        rows = aq.list_students_admin()
-        assert len(rows) == 1 and rows[0]["is_active"] == 0
-        assert aq.list_students_admin(section_id=sid)[0]["id"] == stu["student_id"]
-        assert aq.list_students_admin(section_id=99999) == []
+    other = create_student(app, "1AB21CS201", section_id_for(app, "IoT", "1st Year", "B"))
+    api_post(admin_client, f"/api/admin/students/{stu['student_id']}/remove-registration")
+    data = admin_client.get("/api/admin/students").json()
+    assert data["total"] == 2
+    live, removed = data["items"]  # live registrations are listed first
+    assert live["usn"] == other["usn"] and live["is_active"] is True and live["is_removed"] is False
+    assert live["class"] == {"section_id": other["section_id"], "branch": "CSE", "department": "IoT",
+                             "year": "1st Year", "section": "B", "label": "CSE → IoT → 1st Year → B"}
+    assert live["can_remove_registration"] is True and live["is_unmapped"] is False
+    assert removed["is_active"] is False and removed["is_removed"] is True
+    assert removed["can_remove_registration"] is False and removed["usn"] == stu["usn"]
+    assert removed["email"] == stu["email"]
+    # filter by class
+    only = admin_client.get(f"/api/admin/students?section_id={sid}").json()
+    assert [s["id"] for s in only["items"]] == [stu["student_id"]]
+    assert admin_client.get("/api/admin/students?section_id=99999").json()["items"] == []
+    err(admin_client.get("/api/admin/students?section_id=abc"), 400, "validation_error")
+
+
+def test_unmapped_legacy_student_is_flagged_with_legacy_text(app, admin_client):
+    stu, fac, sid = _student_with_faculty(app)
+    db_exec(app, "UPDATE students SET section_id = NULL, branch = 'ECE', department = 'Physics', year = 'Final', "
+                 "section = '9' WHERE id = ?", (stu["student_id"],))
+    row = admin_client.get("/api/admin/students").json()["items"][0]
+    assert row["class"] is None and row["is_unmapped"] is True
+    assert row["legacy_class"] == {"branch": "ECE", "department": "Physics", "year": "Final", "section": "9"}
+    assert admin_client.get("/api/admin/dashboard").json()["stats"]["unmapped_student_count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -836,6 +1038,10 @@ def _columns(path, table):
         con.close()
 
 
+def _legacy_settings(tmp_path, path):
+    return make_settings(tmp_path, database_path=str(path), upload_root=str(tmp_path / "up"))
+
+
 @pytest.fixture
 def legacy_db(tmp_path):
     path = tmp_path / "legacy.db"
@@ -846,7 +1052,7 @@ def legacy_db(tmp_path):
 
 def test_legacy_migration_adds_columns_seeds_structure_and_backfills(legacy_db):
     tmp_path, path = legacy_db
-    app = create_app(make_config(path, tmp_path / "up"))
+    app = create_app(_legacy_settings(tmp_path, path))
 
     assert "section_id" in _columns(str(path), "students")
     assert "last_login_at" in _columns(str(path), "users")
@@ -867,11 +1073,13 @@ def test_legacy_migration_adds_columns_seeds_structure_and_backfills(legacy_db):
             assert row["section_id"] is None, usn
             # unmatched rows keep their original text untouched
             assert (row["branch"], row["department"], row["year"], row["section"]) == (branch, dept, year, sec)
+    # users / faculty rows survive too
+    assert db_count(app, "users") == 2 + len(LEGACY_STUDENTS) and db_count(app, "faculty") == 2
 
 
 def test_legacy_migration_backfills_faculty_assignments_and_keeps_legacy_rows(legacy_db):
     tmp_path, path = legacy_db
-    app = create_app(make_config(path, tmp_path / "up"))
+    app = create_app(_legacy_settings(tmp_path, path))
     assert db_count(app, "faculty_classes") == len(LEGACY_FACULTY_CLASSES)  # legacy table untouched
     with app.app_context():
         get = lambda code: db_one(app, "SELECT id FROM faculty WHERE faculty_code = ?", (code,))["id"]
@@ -886,7 +1094,7 @@ def test_legacy_migration_backfills_faculty_assignments_and_keeps_legacy_rows(le
 
 def test_legacy_migration_grants_access_only_through_linked_assignments(legacy_db):
     tmp_path, path = legacy_db
-    app = create_app(make_config(path, tmp_path / "up"))
+    app = create_app(_legacy_settings(tmp_path, path))
     sid = lambda usn: db_one(app, "SELECT id FROM students WHERE usn = ?", (usn,))["id"]
     fid = lambda code: db_one(app, "SELECT id FROM faculty WHERE faculty_code = ?", (code,))["id"]
     with app.app_context():
@@ -900,7 +1108,7 @@ def test_legacy_migration_grants_access_only_through_linked_assignments(legacy_d
 
 def test_legacy_migration_is_idempotent_across_restarts(legacy_db):
     tmp_path, path = legacy_db
-    cfg = make_config(path, tmp_path / "up")
+    cfg = _legacy_settings(tmp_path, path)
     app = create_app(cfg)
     first = (db_count(app, "faculty_assignments"), db_count(app, "students", "section_id IS NOT NULL"),
              db_count(app, "sections"), db_count(app, "faculty_classes"))
@@ -912,7 +1120,7 @@ def test_legacy_migration_is_idempotent_across_restarts(legacy_db):
 
 def test_backfill_does_not_resurrect_an_assignment_admin_removed(legacy_db):
     tmp_path, path = legacy_db
-    cfg = make_config(path, tmp_path / "up")
+    cfg = _legacy_settings(tmp_path, path)
     app = create_app(cfg)
     db_exec(app, "UPDATE faculty_assignments SET is_active = 0, deactivated_at = datetime('now')")
     app = create_app(cfg)  # restart runs the backfill again
@@ -923,7 +1131,7 @@ def test_backfill_does_not_resurrect_an_assignment_admin_removed(legacy_db):
 def test_backfill_links_a_student_added_later_with_legacy_values(legacy_db):
     """A row left unmatched is picked up once Admin creates the matching class."""
     tmp_path, path = legacy_db
-    cfg = make_config(path, tmp_path / "up")
+    cfg = _legacy_settings(tmp_path, path)
     app = create_app(cfg)
     assert db_one(app, "SELECT section_id FROM students WHERE usn = 'L5'")["section_id"] is None
     with app.app_context():
@@ -936,10 +1144,26 @@ def test_backfill_links_a_student_added_later_with_legacy_values(legacy_db):
     assert row["section_id"] is not None and row["department"] == "Physics"
 
 
+def test_legacy_database_is_usable_through_the_admin_api(legacy_db):
+    """End to end on a migrated old database: unmapped rows are flagged, mapped rows carry their class."""
+    tmp_path, path = legacy_db
+    app = create_app(_legacy_settings(tmp_path, path))
+    from tests.conftest import make_admin, ADMIN_EMAIL
+    make_admin(app)
+    c = login_client(app, ADMIN_EMAIL)
+    rows = {s["usn"]: s for s in c.get("/api/admin/students").json()["items"]}
+    assert rows["L1"]["class"]["label"] == "CSE → AIML → 3rd Year → A" and rows["L1"]["is_unmapped"] is False
+    assert rows["L5"]["class"] is None and rows["L5"]["is_unmapped"] is True
+    assert rows["L5"]["legacy_class"]["department"] == "Physics"
+    stats = c.get("/api/admin/dashboard").json()["stats"]
+    assert stats["student_count"] == len(LEGACY_STUDENTS) and stats["unmapped_student_count"] == 5
+    assert stats["faculty_count"] == 2
+
+
 def test_migrate_on_fresh_db_is_noop_and_columns_present(app):
-    with app.app_context():
-        from models import database
-        from models.database import get_db
-        database._migrate(get_db())
-        database._migrate(get_db())  # idempotent
-    assert {"section_id"} <= {c for c in _columns(app.config["DATABASE_PATH"], "students")}
+    from api import db as dbmod
+    with app.app_context() as db:
+        dbmod._migrate(db)
+        dbmod._migrate(db)  # idempotent
+    assert {"section_id"} <= _columns(app.state.settings.database_path, "students")
+    assert {"last_login_at"} <= _columns(app.state.settings.database_path, "users")

@@ -27,12 +27,26 @@ def get_unread_count(user_id):
     return queries.get_unread_notification_count(user_id)
 
 
-def list_notifications(user_id):
-    return queries.list_notifications_for_user(user_id)
+def list_notifications(user_id, limit=50):
+    return queries.list_notifications_for_user(user_id, limit)
+
+
+def serialize(row):
+    return {
+        "id": row["id"],
+        "notification_type": row["notification_type"],
+        "title": row["title"],
+        "message": row["message"],
+        "related_entity_type": row["related_entity_type"],
+        "related_entity_id": row["related_entity_id"],
+        "is_read": bool(row["is_read"]),
+        "created_at": row["created_at"],
+    }
 
 
 def mark_read(notification_id, user_id):
-    queries.mark_notification_read(notification_id, user_id)
+    """Mark one of the user's own notifications read. Returns False if it does not exist / is not theirs."""
+    return queries.mark_notification_read(notification_id, user_id) > 0
 
 
 def mark_all_read(user_id):

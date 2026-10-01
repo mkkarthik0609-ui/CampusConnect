@@ -43,9 +43,17 @@ def student_request_profile_change(student_user_id, changes: dict, reason=None):
 
 
 def faculty_request_profile_change(faculty_user_id, changes: dict, reason=None):
-    changes = {k: v for k, v in changes.items() if k in FACULTY_EDITABLE_FIELDS and v}
+    changes = {k: v.strip() for k, v in changes.items() if k in FACULTY_EDITABLE_FIELDS and v and v.strip()}
     if not changes:
         raise PermissionError_("No valid profile fields were submitted for change.")
+    if "professional_email" in changes:
+        from services.auth_service import validate_email
+        changes["professional_email"] = validate_email(
+            changes["professional_email"], "Professional email", "professional_email")
+        clash = queries.get_faculty_by_professional_email(changes["professional_email"])
+        me = queries.get_faculty_by_user_id(faculty_user_id)
+        if clash and (not me or clash["id"] != me["id"]):
+            raise PermissionError_("That professional email is already in use.")
     if "department" in changes and changes["department"].lower() not in {
         d.lower() for d in aq.list_active_department_names()
     }:

@@ -151,6 +151,12 @@ def get_faculty_with_user(faculty_id):
     ).fetchone()
 
 
+def get_faculty_by_professional_email(email):
+    return get_db().execute(
+        "SELECT * FROM faculty WHERE professional_email = ? COLLATE NOCASE", (email,)
+    ).fetchone()
+
+
 def get_faculty_code_exists(faculty_code):
     return get_db().execute("SELECT 1 FROM faculty WHERE faculty_code = ?", (faculty_code,)).fetchone() is not None
 
@@ -261,7 +267,8 @@ def create_supporting_request(student_id, faculty_id, requested_by):
         """INSERT INTO supporting_relationships (student_id, faculty_id, requested_by, status)
            VALUES (?, ?, ?, 'PENDING')
            ON CONFLICT(student_id, faculty_id) DO UPDATE SET
-               requested_by = excluded.requested_by, status = 'PENDING', updated_at = datetime('now')""",
+               requested_by = excluded.requested_by, status = 'PENDING',
+               created_at = datetime('now'), updated_at = datetime('now')""",
         (student_id, faculty_id, requested_by),
     )
     db.commit()
@@ -473,22 +480,39 @@ def edit_message(message_id, new_text):
     db.commit()
 
 
+# SQL twin of is_faculty_accessible_to_student() for rows of ``chats c`` (an ACTIVE class assignment that
+# matches the student's section, or an ACCEPTED supporting relationship). Keep the two in sync.
+CHAT_ACCESSIBLE_SQL = """(
+    EXISTS (SELECT 1 FROM students ast
+            JOIN users asu ON asu.id = ast.user_id AND asu.is_active = 1
+            JOIN faculty_assignments afa ON afa.section_id = ast.section_id AND afa.is_active = 1
+            JOIN sections asec ON asec.id = afa.section_id
+            JOIN academic_years ay ON ay.id = asec.academic_year_id
+            JOIN departments ad ON ad.id = ay.department_id
+            JOIN branches ab ON ab.id = ad.branch_id
+            WHERE ast.id = c.student_id AND afa.faculty_id = c.faculty_id
+              AND asec.is_active AND ay.is_active AND ad.is_active AND ab.is_active)
+    OR EXISTS (SELECT 1 FROM supporting_relationships asr
+            JOIN students ast2 ON ast2.id = asr.student_id
+            JOIN users asu2 ON asu2.id = ast2.user_id AND asu2.is_active = 1
+            WHERE asr.student_id = c.student_id AND asr.faculty_id = c.faculty_id AND asr.status = 'ACCEPTED')
+)"""
+
+
 def get_total_unread_for_user(user_id, role):
+    """Unread incoming messages in chats the user can still use (a chat whose access was revoked,
+    e.g. by removing the faculty assignment, no longer counts)."""
     db = get_db()
     if role == "STUDENT":
-        row = db.execute(
-            """SELECT COUNT(*) AS c FROM messages m JOIN chats c ON c.id = m.chat_id
-               JOIN students s ON s.id = c.student_id
-               WHERE s.user_id = ? AND m.is_seen = 0 AND m.sender_user_id != ?""",
-            (user_id, user_id),
-        ).fetchone()
+        owner_join = "JOIN students o ON o.id = c.student_id"
     else:
-        row = db.execute(
-            """SELECT COUNT(*) AS c FROM messages m JOIN chats c ON c.id = m.chat_id
-               JOIN faculty f ON f.id = c.faculty_id
-               WHERE f.user_id = ? AND m.is_seen = 0 AND m.sender_user_id != ?""",
-            (user_id, user_id),
-        ).fetchone()
+        owner_join = "JOIN faculty o ON o.id = c.faculty_id"
+    row = db.execute(
+        f"""SELECT COUNT(*) AS c FROM messages m JOIN chats c ON c.id = m.chat_id
+            {owner_join}
+            WHERE o.user_id = ? AND m.is_seen = 0 AND m.sender_user_id != ? AND {CHAT_ACCESSIBLE_SQL}""",
+        (user_id, user_id),
+    ).fetchone()
     return row["c"] if row else 0
 
 
@@ -635,10 +659,11 @@ def get_unread_notification_count(user_id):
 
 def mark_notification_read(notification_id, user_id):
     db = get_db()
-    db.execute(
+    cur = db.execute(
         "UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?", (notification_id, user_id)
     )
     db.commit()
+    return cur.rowcount
 
 
 def mark_all_notifications_read(user_id):

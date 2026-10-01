@@ -5,6 +5,7 @@ existing, active rows (validated by `resolve_section`)."""
 import re
 
 from models import academic_queries as aq
+from models import admin_queries
 
 DEFAULT_BRANCH = "CSE"
 DEFAULT_DEPARTMENTS = ["AIML", "AIDE", "GenAI", "Cybersecurity", "Blockchain", "IoT"]
@@ -19,6 +20,10 @@ _ORDINAL = {1: "1st", 2: "2nd", 3: "3rd"}
 
 class AcademicError(Exception):
     pass
+
+
+class AcademicInUseError(AcademicError):
+    """The item still has students or faculty assignments, so it cannot be deleted (API: 409 ``in_use``)."""
 
 
 def year_label(number):
@@ -94,8 +99,21 @@ def backfill_legacy_data():
 
 # ---------- read helpers ----------
 
-def get_tree(active_only=True):
-    """Nested structure used by signup / request forms (JSON) and the admin tree view."""
+def get_tree(active_only=True, with_usage=False):
+    """Nested structure used by signup / request forms (JSON) and the admin tree view.
+
+    ``with_usage=True`` (admin view) adds ``student_count`` (every student row linked below the node,
+    removed registrations included), ``assignment_count`` (every faculty assignment row, active or not)
+    and ``can_delete`` (both zero) to every node: exactly the rule ``delete_unused`` enforces."""
+    usage = admin_queries.usage_by_section() if with_usage else {}
+
+    def _finish(node, children):
+        if with_usage:
+            node["student_count"] = sum(c["student_count"] for c in children)
+            node["assignment_count"] = sum(c["assignment_count"] for c in children)
+            node["can_delete"] = not node["student_count"] and not node["assignment_count"]
+        return node
+
     tree = []
     for b in aq.list_branches():
         if active_only and not b["is_active"]:
@@ -112,15 +130,18 @@ def get_tree(active_only=True):
                 for s in aq.list_sections(y["id"]):
                     if active_only and not s["is_active"]:
                         continue
-                    y_node["sections"].append(
-                        {"id": s["id"], "name": s["name"], "is_active": bool(s["is_active"])}
-                    )
+                    s_node = {"id": s["id"], "name": s["name"], "is_active": bool(s["is_active"])}
+                    if with_usage:
+                        counts = usage.get(s["id"], (0, 0))
+                        s_node["student_count"], s_node["assignment_count"] = counts
+                        s_node["can_delete"] = not counts[0] and not counts[1]
+                    y_node["sections"].append(s_node)
                 if y_node["sections"] or not active_only:
-                    d_node["years"].append(y_node)
+                    d_node["years"].append(_finish(y_node, y_node["sections"]))
             if d_node["years"] or not active_only:
-                b_node["departments"].append(d_node)
+                b_node["departments"].append(_finish(d_node, d_node["years"]))
         if b_node["departments"] or not active_only:
-            tree.append(b_node)
+            tree.append(_finish(b_node, b_node["departments"]))
     return tree
 
 
@@ -201,5 +222,6 @@ def delete_unused(level, row_id):
     if level not in _LEVEL_GETTERS or not _LEVEL_GETTERS[level](row_id):
         raise AcademicError("Item not found.")
     if aq.count_students_under(level, row_id) or aq.count_assignments_under(level, row_id):
-        raise AcademicError("This item has students or faculty assignments; deactivate it instead of deleting.")
+        raise AcademicInUseError(
+            "This item has students or faculty assignments; deactivate it instead of deleting.")
     aq.delete_level(level, row_id)

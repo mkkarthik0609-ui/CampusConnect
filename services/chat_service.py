@@ -10,20 +10,21 @@ class ChatEditError(Exception):
     pass
 
 
-def open_chat(student_id, faculty_id, viewer_user_id):
+MAX_MESSAGE_LENGTH = 4000
+
+
+def open_chat(student_id, faculty_id, viewer_user_id=None):
+    """Get-or-create the chat of this pair. Does NOT mark anything seen (reading the chat does);
+    ``viewer_user_id`` is accepted for backwards compatibility only."""
     if not queries.is_faculty_accessible_to_student(student_id, faculty_id):
         raise ChatAccessError("You do not have permission to message this faculty member.")
-    chat = queries.get_or_create_chat(student_id, faculty_id)
-    queries.mark_messages_seen(chat["id"], viewer_user_id)
-    return chat
+    return queries.get_or_create_chat(student_id, faculty_id)
 
 
-def open_chat_as_faculty(faculty_id, student_id, viewer_user_id):
+def open_chat_as_faculty(faculty_id, student_id, viewer_user_id=None):
     if not queries.is_student_accessible_to_faculty(faculty_id, student_id):
         raise ChatAccessError("You can only message students in your assigned classes or supporting students.")
-    chat = queries.get_or_create_chat(student_id, faculty_id)
-    queries.mark_messages_seen(chat["id"], viewer_user_id)
-    return chat
+    return queries.get_or_create_chat(student_id, faculty_id)
 
 
 def get_chat_for_participant(chat_id, user_id, role):
@@ -51,14 +52,17 @@ def send_text_message(chat_id, sender_user_id, text):
     text = (text or "").strip()
     if not text:
         raise ChatEditError("Message cannot be empty.")
-    if len(text) > 4000:
-        raise ChatEditError("Message is too long (max 4000 characters).")
+    if len(text) > MAX_MESSAGE_LENGTH:
+        raise ChatEditError(f"Message is too long (max {MAX_MESSAGE_LENGTH} characters).")
     return _send_and_notify(chat_id, sender_user_id, message_text=text)
 
 
-def send_attachment_message(chat_id, sender_user_id, relative_path, attachment_type, original_name):
+def send_attachment_message(chat_id, sender_user_id, relative_path, attachment_type, original_name, caption=None):
+    caption = (caption or "").strip() or None
+    if caption and len(caption) > MAX_MESSAGE_LENGTH:
+        raise ChatEditError(f"Message is too long (max {MAX_MESSAGE_LENGTH} characters).")
     return _send_and_notify(
-        chat_id, sender_user_id, attachment_path=relative_path,
+        chat_id, sender_user_id, message_text=caption, attachment_path=relative_path,
         attachment_type=attachment_type, attachment_original_name=original_name,
     )
 
@@ -92,6 +96,8 @@ def edit_message(message_id, editor_user_id, new_text):
     new_text = (new_text or "").strip()
     if not new_text:
         raise ChatEditError("Message cannot be empty.")
+    if len(new_text) > MAX_MESSAGE_LENGTH:
+        raise ChatEditError(f"Message is too long (max {MAX_MESSAGE_LENGTH} characters).")
     queries.edit_message(message_id, new_text)
 
 

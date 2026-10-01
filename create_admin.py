@@ -14,30 +14,23 @@ import getpass
 import os
 import sys
 
-# The CLI must not start the reminder scheduler thread.
-os.environ.setdefault("ENABLE_SCHEDULER", "0")
-
-from models import queries  # noqa: E402
-from services import auth_service  # noqa: E402
-from services.auth_service import ValidationError  # noqa: E402
+from api.db import db_session, init_db
+from api.settings import Settings, set_settings
+from models import queries
+from services import auth_service
+from services.auth_service import ValidationError
 
 
 def bootstrap_from_env():
-    """Create the admin described by ADMIN_NAME/ADMIN_EMAIL/ADMIN_PASSWORD if it does not exist yet.
-    Must run inside an app context. Returns 'created', 'exists' or 'skipped' (variables missing).
-    Raises ValidationError if the supplied values are invalid."""
-    name = os.environ.get("ADMIN_NAME", "").strip()
-    email = os.environ.get("ADMIN_EMAIL", "").strip().lower()
-    password = os.environ.get("ADMIN_PASSWORD", "")
-    if not (name and email and password):
-        return "skipped"
-    return "created" if auth_service.ensure_admin(name, email, password) else "exists"
+    """Kept for backwards compatibility: see ``auth_service.bootstrap_admin_from_env``.
+    Must run inside ``db_session()``. Returns 'created', 'exists' or 'skipped'."""
+    return auth_service.bootstrap_admin_from_env()
 
 
-def _run_from_env(app):
-    with app.app_context():
+def _run_from_env(settings):
+    with db_session(settings):
         try:
-            status = bootstrap_from_env()
+            status = auth_service.bootstrap_admin_from_env()
         except ValidationError as e:
             print(f"Error: {e}")
             return 1
@@ -47,12 +40,12 @@ def _run_from_env(app):
     if status == "exists":
         print("An account with that email already exists. Nothing was changed.")
     else:
-        print("Admin account created. You can now log in at /login.")
+        print("Admin account created. You can now sign in.")
     return 0
 
 
-def _run_interactive(app):
-    with app.app_context():
+def _run_interactive(settings):
+    with db_session(settings):
         existing_admins = queries.count_admins()
         if existing_admins > 0:
             print(f"{existing_admins} admin account(s) already exist.")
@@ -79,17 +72,19 @@ def _run_interactive(app):
             return 1
 
         user_id = queries.create_user("ADMIN", email, password_hash, full_name)
-        print(f"Admin account created (id={user_id}). You can now log in at /login.")
+        print(f"Admin account created (id={user_id}). You can now sign in.")
         return 0
 
 
-def main(argv=None):
+def main(argv=None, settings=None):
     argv = sys.argv[1:] if argv is None else argv
-    from app import create_app  # imported lazily: app.py may itself import this module at startup
-    app = create_app()
+    settings = settings or Settings.from_env(enable_scheduler=False)
+    set_settings(settings)
+    os.makedirs(os.path.dirname(os.path.abspath(settings.database_path)), exist_ok=True)
+    init_db(settings)  # make sure the schema exists (idempotent)
     if "--from-env" in argv:
-        return _run_from_env(app)
-    return _run_interactive(app)
+        return _run_from_env(settings)
+    return _run_interactive(settings)
 
 
 if __name__ == "__main__":

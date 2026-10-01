@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#111741" />
+    <meta name="description" content="Campus Connect: Mentor-Connect chat, meeting requests with timing set by faculty, and admin-defined classes for your college." />
+    <link rel="icon" type="image/svg+xml" href="/src/assets/favicon.svg" />
+    <title>Campus Connect</title>
+    <!-- The API serves a strict CSP (script-src 'self'), so no inline scripts: the pre-paint theme script is a module. -->
+    <script type="module" src="/src/lib/preTheme.js"></script>
+    <style>
+      /* Until the app CSS loads, match the system theme so there is no white flash. */
+      html { background: #f2f4fa; }
+      @media (prefers-color-scheme: dark) { html { background: #0b0e1c; } }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>Campus Connect needs JavaScript to run. Please enable it and reload.</noscript>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

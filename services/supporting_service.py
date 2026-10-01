@@ -8,9 +8,14 @@ class SupportingError(Exception):
 
 
 def student_request_faculty(student_id, faculty_id):
+    faculty_row = queries.get_faculty_with_user(faculty_id)
+    if not faculty_row or not queries.get_user_by_id(faculty_row["user_id"])["is_active"]:
+        raise SupportingError("Faculty member not found.")
     existing = queries.get_supporting_relationship(student_id, faculty_id)
     if existing and existing["status"] in ("PENDING", "ACCEPTED"):
         raise SupportingError("A supporting relationship request already exists with this faculty member.")
+    # A previously REJECTED pair is re-opened (UNIQUE(student_id, faculty_id)): the same row goes back to
+    # PENDING and ``requested_by`` is updated to the new requester.
     rel_id = queries.create_supporting_request(student_id, faculty_id, "STUDENT")
     faculty = queries.get_faculty_by_id(faculty_id)
     student = queries.get_student_with_user(student_id)
@@ -30,6 +35,7 @@ def faculty_request_student(faculty_id, student_id):
     existing = queries.get_supporting_relationship(student_id, faculty_id)
     if existing and existing["status"] in ("PENDING", "ACCEPTED"):
         raise SupportingError("A supporting relationship request already exists with this student.")
+    # Re-opens a REJECTED row instead of violating UNIQUE(student_id, faculty_id).
     rel_id = queries.create_supporting_request(student_id, faculty_id, "FACULTY")
     student = queries.get_student_by_id(student_id)
     faculty = queries.get_faculty_with_user(faculty_id)
@@ -45,19 +51,22 @@ def respond_to_request(rel_id, responder_user_id, responder_role, accept: bool):
     rel = queries.get_supporting_relationship_by_id(rel_id)
     if not rel:
         raise SupportingError("Request not found.")
-    if rel["status"] != "PENDING":
-        raise SupportingError("This request has already been responded to.")
 
+    # Authorisation first (only the ADDRESSED party may answer), then the state check.
     if responder_role == "STUDENT":
         student = queries.get_student_by_user_id(responder_user_id)
         if not student or student["id"] != rel["student_id"] or rel["requested_by"] != "FACULTY":
             raise SupportingError("You are not authorized to respond to this request.")
         notify_user_id = queries.get_faculty_by_id(rel["faculty_id"])["user_id"]
-    else:
+    elif responder_role == "FACULTY":
         faculty = queries.get_faculty_by_user_id(responder_user_id)
         if not faculty or faculty["id"] != rel["faculty_id"] or rel["requested_by"] != "STUDENT":
             raise SupportingError("You are not authorized to respond to this request.")
         notify_user_id = queries.get_student_by_id(rel["student_id"])["user_id"]
+    else:
+        raise SupportingError("You are not authorized to respond to this request.")
+    if rel["status"] != "PENDING":
+        raise SupportingError("This request has already been responded to.")
 
     new_status = "ACCEPTED" if accept else "REJECTED"
     queries.respond_supporting_relationship(rel_id, new_status)

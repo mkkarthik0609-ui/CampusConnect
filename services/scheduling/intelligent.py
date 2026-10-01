@@ -1,133 +1,192 @@
-"""Method 3: Transparent data-driven scoring scheduler (no deep learning).
+"""Method 3 - the proposed intelligent scheduler: transparent scoring, no machine learning.
 
-For each faculty member, at every step we look at all not-yet-placed, feasible requests
-and pick the highest-scoring one next (instead of pure arrival order). A request is
-"feasible" only if its earliest possible start (respecting the faculty's availability
-window and whatever is already booked) still ends before the window closes.
+Same engine, same feasibility rules and same 15-minute batch rhythm as the rule-based method
+(class timetable respected, no double booking, inside the student's window). What differs is HOW it
+decides, in two small scoring steps plus one recovery step. All weights live in ``CONFIG`` below.
 
-Score = weighted sum of four transparent, explainable factors, each normalized to 0..1:
-  - waiting_so_far : requests that have already waited longer get boosted (prevents starvation)
-  - priority       : the request's own priority flag (1/2/3 -> normal/priority/urgent)
-  - peak_penalty   : slightly deprioritizes peak-period requests relative to off-peak,
-                      since peak requests already contend for the same busy window
-  - fairness       : boosts a request from a student who has received fewer meetings
-                      so far in this run, so one student cannot dominate a faculty's day
+Step 1 - who goes first (request score, higher = earlier in the batch)::
 
-WEIGHTS below are the tunable part of the formula — the ESD explicitly requires the
-scoring approach to be documented (section 26) and re-evaluatable, so they are kept as
-one clearly-named constant rather than buried in the loop.
+    priority   urgent 1.0 / priority 0.5 / normal 0
+  + fairness   aging: students with few past meetings and a long cumulative wait get a boost
+               (0.6 / (1 + meetings_so_far) + 0.4 * min(1, cumulative_wait / 960 min))
+  + slack      requests whose student window is tight (little room to move) go first
+  + wait       how much of the student's window has already elapsed (used for the waiting list)
+  - risk       estimated no-show / cancellation risk of this student (their history, smoothed)
+
+Step 2 - where it goes (slot score, higher = better). For each gap in the faculty calendar the
+earliest-fitting and the latest-fitting position inside the student's window are scored::
+
+    - wait     later start = worse (the student waits longer)
+  + pack       placing the meeting flush against a class, window edge or another meeting is good,
+               and leaving an unusable sliver (< 10 min) is bad (idle-gap minimisation)
+  - spread     hours of the day that are already heavily booked are avoided (peak-hour spreading)
+
+Step 3 - recovery (back-fill). Requests that did not fit are kept on a waiting list while their window
+is still open. When a cancellation frees a slot they are offered it (best request score first).
+When a no-show is declared (5 min after the start) students who accepted "on-call" meetings are
+seated in the freed time immediately.
 """
+from services.scheduling import core
 
-WEIGHTS = {
-    "waiting_so_far": 0.35,
-    "priority": 0.30,
-    "peak_penalty": 0.15,
-    "fairness": 0.20,
+CONFIG = {
+    "weights": {
+        # step 1: request ordering
+        "priority": 3.0,
+        "fairness": 2.0,
+        "slack": 1.0,
+        "wait": 1.0,
+        "risk": 1.0,
+        # step 2: slot choice
+        "slot_wait": 6.0,
+        "pack": 1.0,
+        "spread": 0.25,
+    },
+    "backfill": True,               # step 3: waiting list, cancellation and no-show back-fill
+    "displace": True,               # urgent/priority requests may move a lower-priority booking
+    "displace_min_notice_min": 120, # ...but only if that meeting is at least this far away
+    "displace_max_delay_min": 120,  # ...and only if the moved student is delayed by at most this much
+    "min_useful_fragment_min": 10,  # shorter leftovers cannot host any meeting
+    "fairness_wait_cap_min": 960,
+    "slack_scale_min": 720,
+    "risk_prior": 0.12,             # prior failure rate and prior strength for the risk estimate
+    "risk_prior_strength": 3,
 }
 
-MAX_DURATION = 30  # matches simulator's max meeting_duration_min, used for normalization
+PRIORITY_SCORE = {1: 0.0, 2: 0.5, 3: 1.0}
 
 
-def _score(r, now_min, served_count_by_student):
-    waiting_so_far = max(0, now_min - r["request_timestamp_min"])
-    waiting_norm = min(waiting_so_far / 120.0, 1.0)  # cap influence at 2 hours of waiting
+class IntelligentPolicy:
+    name = "intelligent"
+    immediate = False
+    respects_classes = True
 
-    priority_norm = (r["priority"] - 1) / 2.0  # 1->0, 2->0.5, 3->1
+    def __init__(self, config=None):
+        cfg = {k: (dict(v) if isinstance(v, dict) else v) for k, v in CONFIG.items()}
+        for k, v in (config or {}).items():
+            if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+                cfg[k].update(v)
+            else:
+                cfg[k] = v
+        self.cfg = cfg
+        self.w = cfg["weights"]
+        self.waitlist = {}          # faculty_id -> [request, ...]
 
-    peak_norm = 1.0 - r["peak_period"]  # off-peak requests score higher (less contention)
+    # -- step 1 ----------------------------------------------------------------------
+    def request_score(self, eng, req, now):
+        c, w = self.cfg, self.w
+        st = eng.student(req["student_id"])
+        fair = (0.6 / (1 + st.scheduled)
+                + 0.4 * min(1.0, st.cum_wait / c["fairness_wait_cap_min"]))
+        width = req["pref_to_min"] - req["pref_from_min"]
+        slack = 1.0 - min(1.0, max(0, width - req["duration_min"]) / c["slack_scale_min"])
+        span = max(1, req["pref_to_min"] - req["arrival_min"])
+        aged = min(1.0, max(0, now - req["arrival_min"]) / span)
+        risk = ((st.fails + c["risk_prior"] * c["risk_prior_strength"])
+                / (st.booked + c["risk_prior_strength"]))
+        return (w["priority"] * PRIORITY_SCORE[req["priority"]] + w["fairness"] * fair
+                + w["slack"] * slack + w["wait"] * aged - w["risk"] * risk)
 
-    served = served_count_by_student.get(r["experiment_student_id"], 0)
-    fairness_norm = 1.0 / (1.0 + served)  # first meeting for a student scores highest
+    def order(self, eng, batch, now):
+        return sorted(batch, key=lambda r: (-self.request_score(eng, r, now), r["arrival_min"], r["request_id"]))
 
-    return (
-        WEIGHTS["waiting_so_far"] * waiting_norm
-        + WEIGHTS["priority"] * priority_norm
-        + WEIGHTS["peak_penalty"] * peak_norm
-        + WEIGHTS["fairness"] * fairness_norm
-    )
+    # -- step 2 ----------------------------------------------------------------------
+    def choose(self, eng, req, now, use_classes=True, exact_start=None):
+        if exact_start is not None:
+            return core.earliest_fit(eng, req, now, True, exact_start)
+        c, w, g = self.cfg, self.w, eng.grid
+        d = req["duration_min"]
+        lo, hi = max(now, req["pref_from_min"]), req["pref_to_min"]
+        cal = eng.cals[req["faculty_id"]]
+        min_frag = c["min_useful_fragment_min"]
+        best, best_key = None, None
+        for gs, ge in cal.gaps(max(now, 0), eng.horizon, True):
+            if ge <= lo or gs >= hi:
+                continue
+            first = core.ceil_grid(max(gs, lo), g)
+            last = core.floor_grid(min(ge, hi) - d, g)
+            if first > last:
+                continue
+            for s in {first, last}:
+                left, right = s - gs, ge - (s + d)
+                touching = (left == 0) + (right == 0)
+                sliver = sum(f for f in (left, right) if 0 < f < min_frag)
+                pack = touching / 2.0 - sliver / 20.0
+                bucket = (s // 60) * 60
+                load = cal.hour_load(bucket, bucket + 60)
+                wait = min(2.0, (s - req["arrival_min"]) / eng.day_minutes)
+                score = -w["slot_wait"] * wait + w["pack"] * pack - w["spread"] * load
+                key = (-score, s)
+                if best_key is None or key < best_key:
+                    best, best_key = s, key
+        return best
 
+    # -- step 3 ----------------------------------------------------------------------
+    def occupied_minutes(self, eng, req):
+        return req["duration_min"]
 
-def schedule(requests):
-    by_faculty = {}
-    for r in requests:
-        by_faculty.setdefault(r["faculty_id"], []).append(r)
-
-    results = []
-    for fid, faculty_requests in by_faculty.items():
-        results.extend(_schedule_faculty(faculty_requests))
-    return results
-
-
-def _schedule_faculty(faculty_requests):
-    pending = []
-    unassignable = []
-    for r in faculty_requests:
-        if r["cancellation"] or r["no_show"]:
-            unassignable.append(_terminal_row(r))
-        else:
-            pending.append(r)
-
-    served_count_by_student = {}
-    busy_until = 0
-    results = []
-
-    while pending:
-        now_min = max((r["request_timestamp_min"] for r in pending), default=0)
+    def displace(self, eng, req, now):
+        """Re-optimisation: move ONE lower-priority booking to another slot so this request fits.
+        Among the candidates the one whose move delays its student the least is chosen, and a move
+        that would delay a student by more than ``displace_max_delay_min`` is never made."""
+        cal = eng.cals[req["faculty_id"]]
+        victims = [b for b in eng.blocks
+                   if b["faculty_id"] == req["faculty_id"] and b["kind"] == "served"
+                   and b["start_min"] >= now + self.cfg["displace_min_notice_min"]
+                   and eng.reqs[b["request_id"]]["priority"] < req["priority"]
+                   and b["start_min"] < req["pref_to_min"] and b["end_min"] > req["pref_from_min"]]
         best = None
-        best_score = -1
-        best_start = None
-        best_end = None
-
-        for r in pending:
-            earliest_start = max(r["request_timestamp_min"], r["faculty_available_from_min"], busy_until)
-            end_time = earliest_start + r["meeting_duration_min"]
-            if end_time > r["faculty_available_to_min"]:
-                continue  # infeasible right now; may still be scored on a later pass
-            score = _score(r, now_min, served_count_by_student)
-            if score > best_score:
-                best, best_score, best_start, best_end = r, score, earliest_start, end_time
-
+        for blk in victims:
+            vreq = eng.reqs[blk["request_id"]]
+            cal.remove(blk["booking_id"])
+            s = self.choose(eng, req, now)
+            moved_to = None
+            if s is not None:
+                cal.add(-1, s, s + req["duration_min"])
+                moved_to = self.choose(eng, vreq, now)
+                cal.remove(-1)
+            cal.add(blk["booking_id"], blk["start_min"], blk["end_min"])
+            if s is None or moved_to is None:
+                continue
+            delay = moved_to - blk["start_min"]
+            if delay > self.cfg["displace_max_delay_min"]:
+                continue
+            key = (delay, blk["request_id"])
+            if best is None or key < best[0]:
+                best = (key, blk, vreq, s, moved_to)
         if best is None:
-            # nothing left is feasible against the current busy_until pointer
-            for r in pending:
-                results.append(_unassigned_row(r))
-            break
+            return False
+        _, blk, vreq, s, moved_to = best
+        eng.unbook(blk["booking_id"], now)
+        eng.book(req, s, now)
+        eng.book(vreq, moved_to, now, rebook=True)
+        return True
 
-        pending.remove(best)
-        busy_until = best_end
-        served_count_by_student[best["experiment_student_id"]] = (
-            served_count_by_student.get(best["experiment_student_id"], 0) + 1
-        )
-        results.append({
-            "request_id": best["request_id"],
-            "faculty_id": best["faculty_id"],
-            "assigned": True,
-            "start_min": best_start,
-            "end_min": best_end,
-            "waiting_time_min": best_start - best["request_timestamp_min"],
-            "conflict": False,
-            "score": round(best_score, 4),
-            "cancellation": False,
-            "no_show": False,
-            "experiment_student_id": best["experiment_student_id"],
-        })
+    def on_reject(self, eng, req, now):
+        if self.cfg["displace"] and req["priority"] >= 2 and self.displace(eng, req, now):
+            return
+        eng.reject(req)
+        if self.cfg["backfill"] and req["pref_to_min"] - req["duration_min"] >= now:
+            self.waitlist.setdefault(req["faculty_id"], []).append(req)
 
-    return results + unassignable
-
-
-def _unassigned_row(r):
-    return {
-        "request_id": r["request_id"], "faculty_id": r["faculty_id"], "assigned": False,
-        "start_min": None, "end_min": None, "waiting_time_min": None,
-        "conflict": bool(r["class_conflict"]), "cancellation": False, "no_show": False,
-        "experiment_student_id": r["experiment_student_id"],
-    }
+    def on_freed(self, eng, fid, now, kind, block):
+        if not self.cfg["backfill"]:
+            return
+        wl = self.waitlist.get(fid)
+        if not wl:
+            return
+        wl[:] = [r for r in wl if r["pref_to_min"] - r["duration_min"] >= now
+                 and eng.assignments[r["request_id"]]["status"] == "unserved"]
+        for req in sorted(wl, key=lambda r: (-self.request_score(eng, r, now), r["arrival_min"], r["request_id"])):
+            if kind == "no_show":
+                if not req["accepts_standby"]:
+                    continue
+                start = self.choose(eng, req, now, exact_start=core.ceil_grid(now, eng.grid))
+            else:
+                start = self.choose(eng, req, now)
+            if start is not None:
+                wl.remove(req)
+                eng.book(req, start, now, backfill=True)
 
 
-def _terminal_row(r):
-    return {
-        "request_id": r["request_id"], "faculty_id": r["faculty_id"], "assigned": False,
-        "start_min": None, "end_min": None, "waiting_time_min": None,
-        "conflict": False, "cancellation": bool(r["cancellation"]), "no_show": bool(r["no_show"]),
-        "experiment_student_id": r["experiment_student_id"],
-    }
+def schedule(world, config=None):
+    return core.run(world, IntelligentPolicy(config))
