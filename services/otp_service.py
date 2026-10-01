@@ -1,14 +1,18 @@
 """Email-verification OTPs for student signup.
 
-Delivery: if SMTP_HOST is configured the code is emailed and never shown on screen. Otherwise the
+Delivery: if RESEND_API_KEY (HTTPS API, works where outbound SMTP is blocked) or SMTP_HOST is configured
+the code is emailed and never shown on screen. Otherwise the
 code is returned to the caller (demo mode) only while settings.show_demo_otp is true.
 
 The "verified in this browser session" helpers take the signed-cookie ``session`` dict explicitly."""
 import hashlib
 import hmac
+import json
 import logging
 import secrets
 import smtplib
+import urllib.error
+import urllib.request
 from datetime import timedelta
 from email.message import EmailMessage
 
@@ -36,8 +40,10 @@ def normalize_email(email):
 
 
 def delivery_mode():
-    """'smtp', 'demo' (on-screen) or 'none'."""
+    """'resend', 'smtp', 'demo' (on-screen) or 'none'."""
     cfg = get_settings()
+    if cfg.resend_api_key:
+        return "resend"
     if cfg.smtp_host:
         return "smtp"
     if cfg.show_demo_otp:
@@ -71,10 +77,46 @@ def generate_and_store_otp(email, ip=None):
     return otp
 
 
+def _deliver_via_resend(cfg, email, otp):
+    """Send the OTP through the Resend HTTPS API. Raises DeliveryError on any failure."""
+    payload = {
+        "from": cfg.resend_from or "Campus Connect <onboarding@resend.dev>",
+        "to": [email],
+        "subject": "Your Campus Connect verification code",
+        "text": (
+            f"Your Campus Connect verification code is {otp}.\n"
+            f"It expires in {cfg.otp_expiry_minutes} minutes. If you did not request it, ignore this email."
+        ),
+    }
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {cfg.resend_api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "campus-connect/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            pass
+    except urllib.error.HTTPError as exc:
+        detail = exc.read(500).decode("utf-8", "replace")  # Resend's error text; never contains the code
+        logger.error("Resend rejected OTP email: HTTP %s %s", exc.code, detail)
+        raise DeliveryError("We could not send the verification email right now. Please try again later.")
+    except (urllib.error.URLError, OSError):
+        logger.exception("Failed to send OTP email via Resend")
+        raise DeliveryError("We could not send the verification email right now. Please try again later.")
+    return True
+
+
 def deliver_otp(email, otp):
     """Email the OTP when SMTP is configured. Returns True if emailed, False if the caller should
     fall back to the on-screen demo. Raises DeliveryError (a ValidationError) if sending fails."""
     cfg = get_settings()
+    if cfg.resend_api_key:
+        return _deliver_via_resend(cfg, email, otp)
     if not cfg.smtp_host:
         return False
     msg = EmailMessage()

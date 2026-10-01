@@ -931,6 +931,48 @@ def test_otp_is_emailed_not_shown_when_smtp_configured(tmp_path, monkeypatch):
     assert c.get("/api/meta").json()["demo_otp_enabled"] is False
 
 
+def test_otp_is_emailed_via_resend_not_shown(tmp_path, monkeypatch):
+    import json
+    import re
+    app = create_app(make_settings(tmp_path, resend_api_key="re_test", resend_from="cc@test.dev",
+                                   show_demo_otp=True))
+    sent = []
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        sent.append((req.full_url, req.headers, json.loads(req.data)))
+        return FakeResp()
+
+    monkeypatch.setattr("services.otp_service.urllib.request.urlopen", fake_urlopen)
+    c = TestClient(app)
+    resp = start(c, "new@x.edu")
+    assert resp.status_code == 200 and resp.json()["delivery"] == "email"
+    url, headers, body = sent[0]
+    assert url == "https://api.resend.com/emails" and headers["Authorization"] == "Bearer re_test"
+    assert body["to"] == ["new@x.edu"] and body["from"] == "cc@test.dev"
+    code = re.search(r"code is (\d{6})", body["text"]).group(1)
+    assert code not in resp.text and "demo_otp" not in resp.text
+    assert c.get("/api/meta").json()["demo_otp_enabled"] is False
+
+
+def test_resend_failure_is_reported_without_leaking(tmp_path, monkeypatch):
+    import urllib.error
+    app = create_app(make_settings(tmp_path, resend_api_key="re_secret_key"))
+
+    def boom(*a, **k):
+        raise urllib.error.URLError("secret network detail")
+    monkeypatch.setattr("services.otp_service.urllib.request.urlopen", boom)
+    resp = start(TestClient(app), "new@x.edu")
+    assert resp.status_code == 503 and err(resp)["code"] == "delivery_unavailable"
+    assert "secret network detail" not in resp.text and "re_secret_key" not in resp.text
+
+
 def test_smtp_failure_is_reported_without_leaking(tmp_path, monkeypatch):
     import smtplib
     app = create_app(make_settings(tmp_path, smtp_host="smtp.test"))

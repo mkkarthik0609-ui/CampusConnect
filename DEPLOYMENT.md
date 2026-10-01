@@ -109,6 +109,7 @@ Every variable the backend reads is documented in `.env.example`. The ones that 
 | `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | *(typed in the dashboard)* | Never commit these. |
 | `SHOW_DEMO_OTP` | `1` | Student signup OTP is returned to the browser and shown on screen (demo mode, used only when no SMTP is configured). Set `0` once SMTP works. |
 | `REMINDER_INTERVAL_MINUTES` | `60` | Meeting-reminder job interval. |
+| `RESEND_API_KEY`, `RESEND_FROM` | *(optional)* | OTP e-mail through Resend's HTTPS API (works on Render free, where SMTP is blocked). Takes priority over SMTP. `RESEND_FROM` e.g. `Campus Connect <no-reply@yourdomain.com>` (verified domain). |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TLS` | *(optional)* | Real OTP e-mail. Add in the dashboard only when you have a provider. |
 | `ENABLE_SCHEDULER` | `1` (default) | `0` turns the reminder job off. |
 | `LOGIN_MAX_FAILURES_PER_IDENTIFIER`, `LOGIN_MAX_FAILURES_PER_IP`, `SESSION_IDLE_TIMEOUT_MINUTES`, `OTP_MAX_PER_EMAIL_PER_HOUR`, `OTP_MAX_PER_IP_PER_HOUR` | defaults 5 / 20 / 60 / 5 / 20 | Optional tuning. |

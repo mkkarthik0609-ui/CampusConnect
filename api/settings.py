@@ -89,6 +89,8 @@ class Settings:
     otp_max_per_ip_per_hour: int = 20
     otp_verified_max_age_minutes: int = 30
     show_demo_otp: bool = True
+    resend_api_key: str = ""
+    resend_from: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
@@ -165,6 +167,8 @@ class Settings:
             otp_max_per_email_per_hour=_env_int("OTP_MAX_PER_EMAIL_PER_HOUR", cls.otp_max_per_email_per_hour),
             otp_max_per_ip_per_hour=_env_int("OTP_MAX_PER_IP_PER_HOUR", cls.otp_max_per_ip_per_hour),
             show_demo_otp=_env_bool("SHOW_DEMO_OTP", True),
+            resend_api_key=os.environ.get("RESEND_API_KEY", "").strip(),
+            resend_from=os.environ.get("RESEND_FROM", "").strip() or os.environ.get("SMTP_FROM", "").strip(),
             smtp_host=os.environ.get("SMTP_HOST", "").strip(),
             smtp_port=_env_int("SMTP_PORT", 587),
             smtp_user=os.environ.get("SMTP_USER", ""),
