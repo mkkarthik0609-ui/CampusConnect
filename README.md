@@ -138,12 +138,10 @@ To start fresh locally, stop the API and delete `database.db` (and any `-wal` / 
 
 There is **no public admin signup**. Choose one:
 
-The sole administrator is `mkkarthik0609@gmail.com` (case-insensitive). Other admin accounts are
-deactivated during startup and admin creation for another email is rejected. The separate Admin Login
-portal is available at `/admin-login`; student and faculty login remain at `/login`.
-For local development/testing only, that dedicated portal accepts any entered password; production
-always verifies the stored password.
-
+A designated administrator account manages the application.
+Other administrator accounts are restricted by the system.
+Authentication behavior differs between development and production.
+Production always verifies the stored password.
 ```powershell
 venv\Scripts\python.exe create_admin.py              # interactive (name, email, password prompts)
 venv\Scripts\python.exe create_admin.py --from-env   # reads ADMIN_NAME, ADMIN_EMAIL, ADMIN_PASSWORD from the environment / .env
