@@ -109,14 +109,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\start-dev.ps1
 ```
 
-The launcher creates `.venv`, installs both sets of dependencies, starts the API and Vite in two
-terminal windows, and opens `http://localhost:5173`. On its first run it writes an ignored local
-`.env` with a **development-only** admin account:
 
-```text
-Email:    admin@campusconnect.local
-Password: CampusConnect1
-```
 
 Change or remove those values in `.env` before using the project beyond local development. The
 launcher never replaces an existing `.env` or an existing admin password.
