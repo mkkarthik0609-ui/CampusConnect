@@ -211,11 +211,12 @@ def get_faculty_classes(faculty_id):
 
 
 def search_faculty(query, limit=20):
-    like = f"%{query}%"
+    escaped = (query or "").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = f"%{escaped}%"
     return get_db().execute(
         """SELECT f.id, f.faculty_code, f.department, u.full_name, u.profile_picture_path
            FROM faculty f JOIN users u ON u.id = f.user_id
-           WHERE f.faculty_code LIKE ? OR u.full_name LIKE ?
+           WHERE f.faculty_code LIKE ? ESCAPE '\' OR u.full_name LIKE ? ESCAPE '\'
            ORDER BY u.full_name LIMIT ?""",
         (like, like, limit),
     ).fetchall()
@@ -230,16 +231,16 @@ def list_all_faculty():
 
 # ---------- supporting_relationships ----------
 
-def create_supporting_request(student_id, faculty_id, requested_by):
+def create_supporting_request(student_id, faculty_id, requested_by, note=None):
     db = get_db()
     # UNIQUE(student_id, faculty_id): a previously REJECTED pair is re-opened instead of crashing.
     db.execute(
-        """INSERT INTO supporting_relationships (student_id, faculty_id, requested_by, status)
-           VALUES (?, ?, ?, 'PENDING')
+        """INSERT INTO supporting_relationships (student_id, faculty_id, requested_by, note, status)
+           VALUES (?, ?, ?, ?, 'PENDING')
            ON CONFLICT(student_id, faculty_id) DO UPDATE SET
-               requested_by = excluded.requested_by, status = 'PENDING',
+               requested_by = excluded.requested_by, note = excluded.note, status = 'PENDING',
                created_at = datetime('now'), updated_at = datetime('now')""",
-        (student_id, faculty_id, requested_by),
+        (student_id, faculty_id, requested_by, note),
     )
     db.commit()
     return db.execute(
@@ -302,6 +303,59 @@ def list_pending_supporting_requests_for_faculty(faculty_id):
            ORDER BY sr.created_at DESC""",
         (faculty_id,),
     ).fetchall()
+
+
+def create_admin_message(sender_user_id, recipient_user_id, message_text):
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO admin_messages (sender_user_id, recipient_user_id, message_text) VALUES (?, ?, ?)",
+        (sender_user_id, recipient_user_id, message_text),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def list_admin_messages(user_id, other_user_id=None):
+    db = get_db()
+    if other_user_id is None:
+        return db.execute(
+            """SELECT am.*, su.full_name AS sender_name, su.role AS sender_role,
+                      ru.full_name AS recipient_name, ru.role AS recipient_role
+               FROM admin_messages am
+               JOIN users su ON su.id = am.sender_user_id
+               JOIN users ru ON ru.id = am.recipient_user_id
+               WHERE am.sender_user_id = ? OR am.recipient_user_id = ?
+               ORDER BY am.created_at, am.id""",
+            (user_id, user_id),
+        ).fetchall()
+    return db.execute(
+        """SELECT am.*, su.full_name AS sender_name, su.role AS sender_role,
+                  ru.full_name AS recipient_name, ru.role AS recipient_role
+           FROM admin_messages am
+           JOIN users su ON su.id = am.sender_user_id
+           JOIN users ru ON ru.id = am.recipient_user_id
+           WHERE (am.sender_user_id = ? AND am.recipient_user_id = ?)
+              OR (am.sender_user_id = ? AND am.recipient_user_id = ?)
+           ORDER BY am.created_at, am.id""",
+        (user_id, other_user_id, other_user_id, user_id),
+    ).fetchall()
+
+
+def mark_admin_messages_seen(user_id, other_user_id=None):
+    db = get_db()
+    if other_user_id is None:
+        db.execute(
+            "UPDATE admin_messages SET is_seen = 1, seen_at = datetime('now') "
+            "WHERE recipient_user_id = ? AND is_seen = 0",
+            (user_id,),
+        )
+    else:
+        db.execute(
+            "UPDATE admin_messages SET is_seen = 1, seen_at = datetime('now') "
+            "WHERE recipient_user_id = ? AND sender_user_id = ? AND is_seen = 0",
+            (user_id, other_user_id),
+        )
+    db.commit()
 
 
 def list_pending_supporting_requests_for_student(student_id):

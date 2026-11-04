@@ -139,7 +139,7 @@ def dashboard(user: CurrentUser = Depends(_FACULTY)):
     for r in cq.list_relationships(faculty_id=fid, status="PENDING"):
         if r["requested_by"] == "STUDENT":
             pending_supporting.append({
-                "id": r["id"], "created_at": r["created_at"],
+                "id": r["id"], "created_at": r["created_at"], "note": r["note"],
                 "student": cards.student(id=r["student_id"], usn=r["usn"], full_name=r["student_name"],
                                          picture_path=r["student_picture"], section_id=r["section_id"]),
             })

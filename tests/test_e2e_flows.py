@@ -27,7 +27,7 @@ def err(resp):
 @pytest.fixture
 def campus(app):
     """An admin (service level) plus the id of the seeded CSE / AIML / 3rd Year / A section."""
-    return {"admin_id": make_admin(app), "admin_email": "admin@college.edu",
+    return {"admin_id": make_admin(app), "admin_email": "mkkarthik0609@gmail.com",
             "sid": find_section("CSE", "AIML", "3rd Year", "A", app=app)}
 
 
@@ -810,17 +810,13 @@ def test_every_admin_page_loads_with_real_data(app, world):
             assert client.get(path).status_code == expected, (expected, path)
 
 
-def test_admin_creates_another_admin_who_can_log_in(app, campus):
+def test_admin_cannot_create_another_admin(app, campus):
     ac = login_client(app, campus["admin_email"])
     payload = {"full_name": "Second Admin", "email": "admin2@college.edu", "password": PASSWORD,
                "confirm_password": PASSWORD}
     assert api_post(ac, "/api/admin/admins", json={**payload, "confirm_password": "nope"}).status_code == 400
-    assert api_post(ac, "/api/admin/admins", json=payload).status_code == 201
     assert api_post(ac, "/api/admin/admins", json=payload).status_code == 409
-    second = login_client(app, "admin2@college.edu")
-    emails = {a["email"] for a in second.get("/api/admin/admins").json()["items"]}
-    assert emails == {"admin@college.edu", "admin2@college.edu"}
-    assert second.get("/api/admin/dashboard").status_code == 200
+    assert ac.get("/api/admin/admins").json()["total"] == 1
 
 
 def test_admin_builds_a_class_and_a_student_registers_into_it(app, campus):

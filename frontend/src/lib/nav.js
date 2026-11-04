@@ -4,7 +4,7 @@
  * `icon` is a lucide-react component.
  */
 import {
-  Bell, BookOpen, CalendarDays, CircleCheck, FlaskConical, Inbox, LayoutDashboard, LayoutGrid, Layers, Link2,
+  Bell, BookOpen, CalendarDays, CircleCheck, Inbox, LayoutDashboard, LayoutGrid, Layers, Link2,
   MessagesSquare, Search, ShieldCheck, UserRound, Users,
 } from "lucide-react";
 
@@ -41,6 +41,7 @@ export const NAV = {
         { to: "/faculty/chat", label: "Mentor-Connect", icon: MessagesSquare, badge: "messages" },
         { to: "/faculty/meetings", label: "Meetings", icon: CalendarDays },
         { to: "/faculty/approvals", label: "Approvals", icon: CircleCheck },
+        { to: "/faculty/admin-messages", label: "Message Admin", icon: MessagesSquare },
       ],
     },
     {
@@ -73,7 +74,7 @@ export const NAV = {
         { to: "/admin/meetings", label: "Meetings", icon: CalendarDays },
         { to: "/admin/chats", label: "Chats", icon: MessagesSquare },
         { to: "/admin/approvals", label: "Approvals", icon: CircleCheck },
-        { to: "/admin/research", label: "Research", icon: FlaskConical },
+        { to: "/admin/faculty-messages", label: "Faculty messages", icon: MessagesSquare },
         notifications,
       ],
     },

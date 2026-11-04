@@ -32,6 +32,13 @@ export const authApi = {
     return data;
   },
 
+  /** POST /api/auth/admin-login { identifier, password } -> admin session */
+  async adminLogin({ identifier, password }) {
+    const data = await api.post("/api/auth/admin-login", { identifier, password }, { skipAuthRedirect: true });
+    setCsrfToken(data?.csrf_token);
+    return data;
+  },
+
   /** POST /api/auth/logout -> { ok, message, csrf_token } */
   async logout() {
     const data = await api.post("/api/auth/logout", {}, { skipAuthRedirect: true });
@@ -162,10 +169,16 @@ export const supportingApi = {
   /** GET /api/supporting/faculty/search?q= (student) -> { items: [faculty + relationship, has_access, access_via, can_request], total, query } */
   searchFaculty: (q) => api.get("/api/supporting/faculty/search", { params: { q } }),
   /** POST /api/supporting/faculty/:facultyId/request (student) -> 201 { ok, id, relationship } (409 when pending/accepted) */
-  requestFaculty: (facultyId) => api.post(`/api/supporting/faculty/${facultyId}/request`, {}),
+  requestFaculty: (facultyId, note) => api.post(`/api/supporting/faculty/${facultyId}/request`, { note: note || undefined }),
   /** POST /api/supporting/:id/accept | /reject (the addressed party) -> { ok, status, relationship } */
   accept: (relId) => api.post(`/api/supporting/${relId}/accept`, {}),
   reject: (relId) => api.post(`/api/supporting/${relId}/reject`, {}),
+};
+
+export const adminMessagesApi = {
+  list: () => api.get("/api/admin-messages"),
+  thread: (facultyUserId) => api.get(`/api/admin-messages/${facultyUserId}`),
+  send: (body) => api.post("/api/admin-messages", body),
 };
 
 // ---- admin console + research (implemented in lib/adminApi.js) ----

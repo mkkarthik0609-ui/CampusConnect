@@ -64,6 +64,7 @@ export default function Login() {
         <>
           <span>New student? <Link to="/signup/student">Create a student account</Link></span>
           <span>New faculty? <Link to="/signup/faculty">Register as faculty</Link></span>
+          <span>Administrator? <Link to="/admin-login">Admin Login</Link></span>
         </>
       }
     >

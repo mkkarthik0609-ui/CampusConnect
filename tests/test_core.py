@@ -487,7 +487,7 @@ def test_current_user_attribute_access(app, client):
 # ---------------------------------------------------------------------------
 
 def test_conftest_helpers(app, admin, admin_client):
-    assert admin["email"] == "admin@college.edu" and make_admin(app) == admin["user_id"]
+    assert admin["email"] == "mkkarthik0609@gmail.com" and make_admin(app) == admin["user_id"]
     assert admin_client.get("/api/auth/session").json()["user"]["role"] == "ADMIN"
     fac = register_faculty(app, "FAC001")
     stu = register_student(app, "1AB21CS001")

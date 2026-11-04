@@ -65,7 +65,7 @@ def people(app):
     admin_id = create_admin(app)
     sid = section_id_for(app)
     return {
-        "admin": {"email": "admin@college.edu", "user_id": admin_id},
+        "admin": {"email": "mkkarthik0609@gmail.com", "user_id": admin_id},
         "fac": create_faculty(app, "FAC100"),
         "stu": create_student(app, "1AB21CS300", sid),
         "sid": sid,

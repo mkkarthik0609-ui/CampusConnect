@@ -32,6 +32,7 @@ export function SupportingRequestRow({ request }) {
           {student.class ? <ClassPath cls={student.class} /> : null}
           <span>asked {timeAgo(request.created_at)}</span>
         </div>
+        {request.note ? <p className="m-0 pl-12 text-sm text-foreground"><span className="font-semibold">Message:</span> {request.note}</p> : null}
       </div>
       <div className="ml-auto flex items-center gap-2">
         <Button type="button" variant="outline" size="sm" disabled={respond.isPending} onClick={reject} aria-label={`Decline ${student.full_name}`}>

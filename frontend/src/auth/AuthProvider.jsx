@@ -73,6 +73,12 @@ export function AuthProvider({ children }) {
     return fresh?.user || null;
   }, [refresh]);
 
+  const adminLogin = useCallback(async (credentials) => {
+    await authApi.adminLogin(credentials);
+    const fresh = await refresh();
+    return fresh?.user || null;
+  }, [refresh]);
+
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
@@ -105,12 +111,13 @@ export function AuthProvider({ children }) {
         messages: data?.unread_messages || 0,
       },
       login,
+      adminLogin,
       logout,
       refresh,
       patchUser,
       retry: () => query.refetch(),
     };
-  }, [status, user, data, login, logout, refresh, patchUser, query]);
+  }, [status, user, data, login, adminLogin, logout, refresh, patchUser, query]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

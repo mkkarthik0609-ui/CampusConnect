@@ -126,8 +126,8 @@ function DashboardBody({ d }) {
           </section>
         </div>
 
-        <section aria-label="Supporting faculty">
-          <SectionHeading title="Supporting faculty" />
+        <section aria-label="Supporting mentors">
+          <SectionHeading title="Supporting Mentors" />
           <div className={panel}>
             {supporting.length ? (
               <ul className="m-0 list-none p-0">
@@ -145,7 +145,7 @@ function DashboardBody({ d }) {
                 ))}
               </ul>
             ) : (
-              <EmptyState icon={Users} compact className="px-4" title="No supporting faculty yet">
+              <EmptyState icon={Users} compact className="px-4" title="No supporting mentors yet">
                 <p>Faculty outside your class can support you too. Send a request and they decide.</p>
               </EmptyState>
             )}

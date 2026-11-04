@@ -11,7 +11,7 @@ import { ClassPath } from "@/components/app/ClassPath";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { errorMessage } from "@/lib/api";
 import { facultyApi } from "@/lib/endpoints";
-import { ListSkeleton, MessageButton, NoClassesEmpty, PersonCell, QueryError, Row, RowList } from "@/features/faculty/ui";
+import { ListSkeleton, MessageButton, PersonCell, QueryError, Row, RowList } from "@/features/faculty/ui";
 import { facultyKeys, useFacultyClasses, useMessageStudent, useRefreshFaculty } from "@/features/faculty/hooks";
 
 const RELATION_LABEL = {
@@ -52,7 +52,6 @@ export default function FacultyFindStudents() {
     onError: (err) => toast.error(errorMessage(err)),
   });
 
-  const noClasses = classes.data && classes.data.assignments.length === 0;
   const results = search.data?.items || [];
   const typing = text.trim() !== q || (search.isFetching && !search.data);
 
@@ -60,13 +59,15 @@ export default function FacultyFindStudents() {
     <>
       <PageHeader
         title="Find students"
-        description="Search by name or USN. Results are limited to students in the classes Admin has assigned to you."
+        description="Search by name or USN across every branch and section."
       />
 
-      {noClasses ? (
-        <div className="rounded-lg border bg-card shadow-sm"><NoClassesEmpty /></div>
-      ) : (
-        <div className="grid max-w-3xl gap-5">
+      {classes.data?.assignments.length === 0 ? (
+        <p className="mb-4 rounded-md border border-warn-line bg-saffron-soft px-3 py-2 text-sm text-saffron-ink">
+          You can discover students across the campus. An Admin assignment or accepted supporting relationship is still required before messaging or sending a supporting request.
+        </p>
+      ) : null}
+      <div className="grid max-w-3xl gap-5">
           <form role="search" onSubmit={(e) => e.preventDefault()} className="relative">
             <label htmlFor="student-search" className="sr-only">Search students by name or USN</label>
             <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3.5 size-[1.15rem] -translate-y-1/2 text-muted-foreground" />
@@ -85,7 +86,7 @@ export default function FacultyFindStudents() {
             {!q && !text.trim() ? (
               <div className="rounded-lg border border-dashed border-line-strong">
                 <EmptyState icon={Search} title="Start typing a name or USN">
-                  <p>Only students in your assigned classes can be found here, even with a partial name.</p>
+                  <p>Students from every branch and section can be found here.</p>
                 </EmptyState>
               </div>
             ) : null}
@@ -108,7 +109,7 @@ export default function FacultyFindStudents() {
                         </div>
                         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                           {relationPill(s.relationship)}
-                          <MessageButton name={s.full_name} pending={message.isPending && message.variables === s.id} onClick={() => message.mutate(s.id)} />
+                          {s.has_access ? <MessageButton name={s.full_name} pending={message.isPending && message.variables === s.id} onClick={() => message.mutate(s.id)} /> : null}
                           {s.can_request ? (
                             <SubmitButton
                               type="button"
@@ -130,14 +131,13 @@ export default function FacultyFindStudents() {
               ) : (
                 <div className="rounded-lg border bg-card shadow-sm">
                   <EmptyState title={`No student found for “${q}”`}>
-                    <p>Check the spelling, or try the USN. Students outside your assigned classes never appear here.</p>
+                    <p>Check the spelling, or try the USN.</p>
                   </EmptyState>
                 </div>
               )
             ) : null}
           </div>
-        </div>
-      )}
+      </div>
     </>
   );
 }

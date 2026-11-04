@@ -37,11 +37,11 @@ def _env_int(name: str, default: int) -> int:
 
 def _detect_environment() -> str:
     env = (os.environ.get("APP_ENV") or "").strip().lower()
-    if env:
-        return env
     # Render sets RENDER=true on its services; never run those in "development" mode by accident.
     if os.environ.get("RENDER"):
         return "production"
+    if env:
+        return env
     return "development"
 
 
@@ -108,6 +108,7 @@ class Settings:
     reminder_interval_minutes: int = 60
     enable_scheduler: bool = True
     bootstrap_admin: bool = False
+    sole_admin_email: str = "mkkarthik0609@gmail.com"
 
     # ------------------------------------------------------------------ derived
     @property
@@ -133,6 +134,11 @@ class Settings:
     @property
     def docs_enabled(self) -> bool:
         return bool(self.debug) and not self.is_production
+
+    @property
+    def admin_any_password_enabled(self) -> bool:
+        """Demo convenience only; production must always verify the password."""
+        return not self.is_production and (self.testing or self.environment in ("development", "test"))
 
     # ------------------------------------------------------------------ construction
     @classmethod

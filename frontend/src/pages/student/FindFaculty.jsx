@@ -11,6 +11,7 @@ import { ListSkeleton } from "@/components/app/PageLoader";
 import { Notice } from "@/components/app/Notice";
 import { StatusPill } from "@/components/app/StatusPill";
 import { SubmitButton } from "@/components/app/SubmitButton";
+import { usePrompt } from "@/components/app/dialogs";
 import { PersonRow } from "@/features/people/PersonRow";
 import { useOpenChat } from "@/features/chat/useOpenChat";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -34,6 +35,7 @@ export default function FindFaculty() {
   });
   const requests = useQuery({ queryKey: queryKeys.supporting, queryFn: () => supportingApi.list(), refetchInterval: 30_000 });
   const open = useOpenChat();
+  const prompt = usePrompt();
   const qc = useQueryClient();
 
   const refresh = () => {
@@ -43,12 +45,12 @@ export default function FindFaculty() {
     qc.invalidateQueries({ queryKey: queryKeys.session });
   };
   const act = useMutation({
-    mutationFn: ({ kind, id }) => (kind === "request" ? supportingApi.requestFaculty(id) : kind === "accept" ? supportingApi.accept(id) : supportingApi.reject(id)),
+    mutationFn: ({ kind, id, note }) => (kind === "request" ? supportingApi.requestFaculty(id, note) : kind === "accept" ? supportingApi.accept(id) : supportingApi.reject(id)),
     onSuccess: (res) => { toast.success(res.message || "Done."); refresh(); },
     onError: (err) => { toast.error(errorMessage(err)); refresh(); },
   });
   const pendingKey = act.isPending ? `${act.variables.kind}:${act.variables.id}` : null;
-  const ctx = { act, open, pendingKey };
+  const ctx = { act, open, pendingKey, prompt };
 
   const results = search.data?.items || [];
   const typing = q.trim() !== term;
@@ -155,8 +157,19 @@ export default function FindFaculty() {
 
 /** What a student can do with one faculty member, given class access and any supporting relationship. */
 function RelationshipActions({ faculty, rel, hasAccess, via, canRequest, ctx }) {
-  const { act, open, pendingKey } = ctx;
+  const { act, open, pendingKey, prompt } = ctx;
   const busyAny = act.isPending || open.isPending;
+  async function request() {
+    const note = await prompt({
+      title: `Request ${faculty.full_name} as supporting faculty`,
+      description: "Optionally explain why you would like this faculty member's support.",
+      label: "Message or note",
+      placeholder: "Tell them what kind of support you are looking for...",
+      confirmLabel: "Send request",
+      maxLength: 1000,
+    });
+    if (note !== null) act.mutate({ kind: "request", id: faculty.id, note });
+  }
 
   if (hasAccess) {
     return (
@@ -189,7 +202,7 @@ function RelationshipActions({ faculty, rel, hasAccess, via, canRequest, ctx }) 
       <>
         <StatusPill status="REJECTED" label="Declined" />
         {canRequest ? (
-          <SubmitButton type="button" size="sm" variant="outline" loading={pendingKey === `request:${faculty.id}`} disabled={busyAny} onClick={() => act.mutate({ kind: "request", id: faculty.id })} aria-label={`Ask ${faculty.full_name} again`}>
+          <SubmitButton type="button" size="sm" variant="outline" loading={pendingKey === `request:${faculty.id}`} disabled={busyAny} onClick={request} aria-label={`Ask ${faculty.full_name} again`}>
             Ask again
           </SubmitButton>
         ) : null}
@@ -199,7 +212,7 @@ function RelationshipActions({ faculty, rel, hasAccess, via, canRequest, ctx }) 
 
   if (canRequest || !rel) {
     return (
-      <SubmitButton type="button" size="sm" loading={pendingKey === `request:${faculty.id}`} disabled={busyAny} onClick={() => act.mutate({ kind: "request", id: faculty.id })} aria-label={`Ask ${faculty.full_name} to be your supporting faculty`}>
+      <SubmitButton type="button" size="sm" loading={pendingKey === `request:${faculty.id}`} disabled={busyAny}       onClick={request} aria-label={`Ask ${faculty.full_name} to be your supporting faculty`}>
         Request support
       </SubmitButton>
     );

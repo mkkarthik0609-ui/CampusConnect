@@ -30,7 +30,7 @@ from api.settings import use_settings  # noqa: E402
 from services import auth_service, assignment_service, captcha_service  # noqa: E402
 
 PASSWORD = "Passw0rd!x"
-ADMIN_EMAIL = "admin@college.edu"
+ADMIN_EMAIL = "mkkarthik0609@gmail.com"
 TEST_SECRET = "test-secret-key-test-secret-key-0123456789"
 
 

@@ -49,6 +49,7 @@ const facultyRoutes = [
   { path: "meetings", element: page(() => import("@/pages/faculty/Meetings")) },
   { path: "find-students", element: page(() => import("@/pages/faculty/FindStudents")) },
   { path: "approvals", element: page(() => import("@/pages/faculty/Approvals")) },
+  { path: "admin-messages", element: page(() => import("@/pages/shared/AdminMessages")) },
 ];
 
 // ---- admin: /admin/... -------------------------------------------------------------------
@@ -66,7 +67,7 @@ const adminRoutes = [
   { path: "chats/:id", element: page(() => import("@/pages/admin/ChatThread")) },
   { path: "approvals", element: page(() => import("@/pages/admin/Approvals")) },
   { path: "admins", element: page(() => import("@/pages/admin/Admins")) },
-  { path: "research", element: page(() => import("@/pages/admin/Research")) },
+  { path: "faculty-messages", element: page(() => import("@/pages/shared/AdminMessages")) },
 ];
 
 // ---- any signed-in user ------------------------------------------------------------------
@@ -109,6 +110,7 @@ export const routes = [
             element: <AuthLayout />,
             children: [
               { path: "/login", element: page(() => import("@/pages/site/Login")) },
+              { path: "/admin-login", element: page(() => import("@/pages/site/AdminLogin")) },
               { path: "/signup/student", element: page(() => import("@/pages/site/SignupStudent")) },
               { path: "/signup/faculty", element: page(() => import("@/pages/site/SignupFaculty")) },
             ],

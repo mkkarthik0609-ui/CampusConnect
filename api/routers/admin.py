@@ -12,6 +12,7 @@ from pydantic import Field
 
 from api.deps import ApiModel, CurrentUser, Stripped, items, ok, require_role, service_errors
 from api.errors import ApiError
+from api.settings import get_settings
 from api.schemas import class_object, profile_picture_url
 from models import academic_queries as aq
 from models import admin_queries
@@ -351,6 +352,8 @@ def create_admin(body: AdminCreateIn, user: CurrentUser = Depends(require_role("
         if body.password != body.confirm_password:
             raise auth_service.ValidationError("Passwords do not match.", "confirm_password")
         password_hash = auth_service.hash_password(body.password, disallow=(email,))
+        if email != get_settings().sole_admin_email.strip().lower():
+            raise ConflictError("Only the configured owner email can receive admin access.", "email")
         if queries.get_user_by_email(email):
             raise ConflictError("An account with this email already exists.", "email")
         new_id = queries.create_user("ADMIN", email, password_hash, full_name)

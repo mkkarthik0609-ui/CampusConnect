@@ -101,6 +101,26 @@ with `DEBUG=1`.
 
 ### Frontend
 
+For a first local run on Windows, install Python 3.12+ and Node.js 20+, then run this from the
+repository root:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\start-dev.ps1
+```
+
+The launcher creates `.venv`, installs both sets of dependencies, starts the API and Vite in two
+terminal windows, and opens `http://localhost:5173`. On its first run it writes an ignored local
+`.env` with a **development-only** admin account:
+
+```text
+Email:    admin@campusconnect.local
+Password: CampusConnect1
+```
+
+Change or remove those values in `.env` before using the project beyond local development. The
+launcher never replaces an existing `.env` or an existing admin password.
+
 ```powershell
 cd frontend
 npm install
@@ -124,6 +144,12 @@ To start fresh locally, stop the API and delete `database.db` (and any `-wal` / 
 ### Creating the first admin
 
 There is **no public admin signup**. Choose one:
+
+The sole administrator is `mkkarthik0609@gmail.com` (case-insensitive). Other admin accounts are
+deactivated during startup and admin creation for another email is rejected. The separate Admin Login
+portal is available at `/admin-login`; student and faculty login remain at `/login`.
+For local development/testing only, that dedicated portal accepts any entered password; production
+always verifies the stored password.
 
 ```powershell
 venv\Scripts\python.exe create_admin.py              # interactive (name, email, password prompts)

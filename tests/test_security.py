@@ -14,7 +14,7 @@ from api.main import create_app
 from models import queries
 from services import auth_service, session_service
 from tests.conftest import (
-    PASSWORD, TEST_SECRET, api_login, api_post, csrf_token, db_count, db_exec, set_session_cookie, db_one, find_section, login_client,
+    ADMIN_EMAIL, PASSWORD, TEST_SECRET, api_login, api_post, csrf_token, db_count, db_exec, set_session_cookie, db_one, find_section, login_client,
     make_admin, make_settings, read_session, register_faculty, register_student, solve_captcha, write_session,
 )
 
@@ -246,10 +246,10 @@ def test_login_takes_constant_hash_work_for_unknown_user(app, client, monkeypatc
 
 
 def test_login_replaces_pre_login_session(app, client):
-    make_user(app, "ADMIN", "a@x.edu")
+    make_user(app, "ADMIN", ADMIN_EMAIL)
     write_session(client, {"attacker_planted": "x", "csrf_token": "attacker-known-token",
                            "planted_flag": "victim@x.edu"})
-    resp = login(client, "a@x.edu", GOOD_PASSWORD)
+    resp = login(client, ADMIN_EMAIL, GOOD_PASSWORD)
     assert resp.status_code == 200
     sess = read_session(client)
     assert "attacker_planted" not in sess and "planted_flag" not in sess
@@ -278,8 +278,8 @@ def test_current_user_object_has_no_password_hash(probe_app, app, client):
 
 
 def test_deactivated_user_session_is_invalidated(probe_app, app, client):
-    ids = make_user(app, "ADMIN", "a@x.edu")
-    login(client, "a@x.edu", GOOD_PASSWORD)
+    ids = make_user(app, "ADMIN", ADMIN_EMAIL)
+    login(client, ADMIN_EMAIL, GOOD_PASSWORD)
     assert client.get("/api/_probe/admin").status_code == 200
     db_exec(app, "UPDATE users SET is_active = 0 WHERE id = ?", (ids["user_id"],))
     assert client.get("/api/_probe/admin").status_code == 401
@@ -288,8 +288,8 @@ def test_deactivated_user_session_is_invalidated(probe_app, app, client):
 
 
 def test_deleted_user_session_is_invalidated(probe_app, app, client):
-    ids = make_user(app, "ADMIN", "a@x.edu")
-    login(client, "a@x.edu", GOOD_PASSWORD)
+    ids = make_user(app, "ADMIN", ADMIN_EMAIL)
+    login(client, ADMIN_EMAIL, GOOD_PASSWORD)
     db_exec(app, "DELETE FROM users WHERE id = ?", (ids["user_id"],))
     assert client.get("/api/_probe/admin").status_code == 401
     assert client.get("/api/auth/session").json()["authenticated"] is False
@@ -308,12 +308,12 @@ def test_role_and_name_are_refreshed_from_database(probe_app, app, client):
     assert client.get("/api/_probe/admin").status_code == 403
     assert read_session(client)["role"] == "STUDENT"
     # promotion / demotion in the database takes effect on the next request
-    db_exec(app, "UPDATE users SET role = 'ADMIN' WHERE id = ?", (ids["user_id"],))
+    db_exec(app, "UPDATE users SET role = 'ADMIN', email = ? WHERE id = ?", (ADMIN_EMAIL, ids["user_id"]))
     assert client.get("/api/_probe/admin").json()["role"] == "ADMIN"
 
 
 def test_forged_session_cookie_is_rejected(probe_app, app, client):
-    ids = make_user(app, "ADMIN", "a@x.edu")
+    ids = make_user(app, "ADMIN", ADMIN_EMAIL)
     fake = {"user_id": ids["user_id"], "role": "ADMIN", "login_at": session_service.now(),
             "last_seen": session_service.now(), "csrf_token": "x" * 40}
     # signed with the wrong key
@@ -325,7 +325,7 @@ def test_forged_session_cookie_is_rejected(probe_app, app, client):
         set_session_cookie(client, junk)
         assert client.get("/api/_probe/admin").status_code == 401
     # payload tampered after signing
-    login(client, "a@x.edu", GOOD_PASSWORD)
+    login(client, ADMIN_EMAIL, GOOD_PASSWORD)
     value = client.cookies.get("cc_session")
     payload, rest = value.split(".", 1)
     set_session_cookie(client, "A" + payload[1:] + "." + rest)
@@ -343,8 +343,8 @@ def test_session_for_unknown_or_malformed_user_id_is_rejected(probe_app, client)
 
 
 def test_idle_timeout(probe_app, app, client, monkeypatch):
-    make_user(app, "ADMIN", "a@x.edu")
-    login(client, "a@x.edu", GOOD_PASSWORD)
+    make_user(app, "ADMIN", ADMIN_EMAIL)
+    login(client, ADMIN_EMAIL, GOOD_PASSWORD)
     start = session_service.now()
     monkeypatch.setattr(session_service, "now", lambda: start + 59 * 60)
     assert client.get("/api/_probe/admin").status_code == 200  # within the window (and refreshes last_seen)
@@ -358,9 +358,9 @@ def test_idle_timeout(probe_app, app, client, monkeypatch):
 
 def test_idle_timeout_is_configurable(tmp_path):
     app = add_probe_routes(create_app(make_settings(tmp_path, session_idle_timeout_minutes=5)))
-    make_user(app, "ADMIN", "a@x.edu")
+    make_user(app, "ADMIN", ADMIN_EMAIL)
     c = TestClient(app)
-    login(c, "a@x.edu", GOOD_PASSWORD)
+    login(c, ADMIN_EMAIL, GOOD_PASSWORD)
     sess = read_session(c)
     sess["last_seen"] -= 6 * 60
     write_session(c, sess)
@@ -368,8 +368,8 @@ def test_idle_timeout_is_configurable(tmp_path):
 
 
 def test_absolute_timeout_even_when_active(probe_app, app, client, monkeypatch):
-    make_user(app, "ADMIN", "a@x.edu")
-    login(client, "a@x.edu", GOOD_PASSWORD)
+    make_user(app, "ADMIN", ADMIN_EMAIL)
+    login(client, ADMIN_EMAIL, GOOD_PASSWORD)
     start = session_service.now()
     offset = 0
     # stay active every 30 minutes for just under 12 hours: still signed in
@@ -425,11 +425,11 @@ def test_signup_rejects_password_equal_to_faculty_id(client):
 # ---------------------------------------------------------------- change password / theme
 
 def test_change_password_flow(app, client):
-    make_user(app, "ADMIN", "a@x.edu")
+    make_user(app, "ADMIN", ADMIN_EMAIL)
     resp = api_post(client, "/api/account/password",
                     json={"current_password": GOOD_PASSWORD, "new_password": "NewPass123", "confirm_password": "NewPass123"})
     assert resp.status_code == 401  # login required
-    login(client, "a@x.edu", GOOD_PASSWORD)
+    login(client, ADMIN_EMAIL, GOOD_PASSWORD)
 
     def post(cur, new, conf):
         return api_post(client, "/api/account/password", json={
@@ -450,13 +450,13 @@ def test_change_password_flow(app, client):
     r = post(GOOD_PASSWORD, "NewPass123", "NewPass123")
     assert r.status_code == 200 and r.json()["ok"] is True
     c2 = TestClient(app)
-    assert login(c2, "a@x.edu", GOOD_PASSWORD).status_code == 401  # old password no longer works
-    assert login(c2, "a@x.edu", "NewPass123").status_code == 200
+    assert login(c2, ADMIN_EMAIL, GOOD_PASSWORD).status_code == 401  # old password no longer works
+    assert login(c2, ADMIN_EMAIL, "NewPass123").status_code == 200
 
 
 def test_change_password_guesses_are_throttled(app, client):
-    make_user(app, "ADMIN", "a@x.edu")
-    login(client, "a@x.edu", GOOD_PASSWORD)
+    make_user(app, "ADMIN", ADMIN_EMAIL)
+    login(client, ADMIN_EMAIL, GOOD_PASSWORD)
     for _ in range(5):
         r = api_post(client, "/api/account/password", json={
             "current_password": "Wrong1234", "new_password": "NewPass123", "confirm_password": "NewPass123"})
@@ -619,9 +619,9 @@ def test_security_headers_present(client):
 
 
 def test_api_responses_are_never_cached(app, client):
-    make_user(app, "ADMIN", "a@x.edu")
+    make_user(app, "ADMIN", ADMIN_EMAIL)
     assert client.get("/api/auth/session").headers["Cache-Control"] == "no-store"
-    login(client, "a@x.edu", GOOD_PASSWORD)
+    login(client, ADMIN_EMAIL, GOOD_PASSWORD)
     for url in ("/api/auth/session", "/api/notifications", "/api/academic/tree", "/api/nope"):
         resp = client.get(url)
         assert resp.headers["Cache-Control"] == "no-store", url
@@ -972,15 +972,15 @@ def test_login_captcha_does_not_bypass_the_lockout(app, client):
 
 def test_admin_bootstrap_is_idempotent_and_never_overwrites(app, monkeypatch):
     monkeypatch.setenv("ADMIN_NAME", "Owner")
-    monkeypatch.setenv("ADMIN_EMAIL", "Owner@Example.com")
+    monkeypatch.setenv("ADMIN_EMAIL", ADMIN_EMAIL)
     monkeypatch.setenv("ADMIN_PASSWORD", "Sample@1234")
     with db_session(app.state.settings):
         assert auth_service.bootstrap_admin_from_env() == "created"
-        first = queries.get_user_by_email("owner@example.com")
+        first = queries.get_user_by_email(ADMIN_EMAIL)
         assert first["role"] == "ADMIN"
         monkeypatch.setenv("ADMIN_PASSWORD", "Different@1234")
         assert auth_service.bootstrap_admin_from_env() == "exists"
-        assert queries.get_user_by_email("owner@example.com")["password_hash"] == first["password_hash"]
+        assert queries.get_user_by_email(ADMIN_EMAIL)["password_hash"] == first["password_hash"]
     monkeypatch.delenv("ADMIN_PASSWORD")
     with db_session(app.state.settings):
         assert auth_service.bootstrap_admin_from_env() == "skipped"
@@ -988,37 +988,37 @@ def test_admin_bootstrap_is_idempotent_and_never_overwrites(app, monkeypatch):
 
 def test_bootstrap_admin_at_startup_when_enabled(tmp_path, monkeypatch):
     monkeypatch.setenv("ADMIN_NAME", "Owner")
-    monkeypatch.setenv("ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("ADMIN_EMAIL", ADMIN_EMAIL)
     monkeypatch.setenv("ADMIN_PASSWORD", "Sample@1234")
     settings = make_settings(tmp_path, testing=False, bootstrap_admin=True)
     app = create_app(settings)
     create_app(settings)  # second start: idempotent
     c = TestClient(app)
-    assert api_login(c, "owner@example.com", "Sample@1234")["user"]["role"] == "ADMIN"
+    assert api_login(c, ADMIN_EMAIL, "Sample@1234")["user"]["role"] == "ADMIN"
     assert db_count(app, "users") == 1
 
 
 def test_bootstrap_not_run_unless_enabled(tmp_path, monkeypatch):
     monkeypatch.setenv("ADMIN_NAME", "Owner")
-    monkeypatch.setenv("ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("ADMIN_EMAIL", ADMIN_EMAIL)
     monkeypatch.setenv("ADMIN_PASSWORD", "Sample@1234")
     app = create_app(make_settings(tmp_path, testing=False, bootstrap_admin=False))
     with db_session(app.state.settings):
-        assert queries.get_user_by_email("owner@example.com") is None
+        assert queries.get_user_by_email(ADMIN_EMAIL) is None
 
 
 def test_create_admin_cli(app, monkeypatch, capsys):
     import create_admin
     settings = app.state.settings
     monkeypatch.setenv("ADMIN_NAME", "Owner")
-    monkeypatch.setenv("ADMIN_EMAIL", "cli@example.com")
+    monkeypatch.setenv("ADMIN_EMAIL", ADMIN_EMAIL)
     monkeypatch.setenv("ADMIN_PASSWORD", "Sample@1234")
     assert create_admin.main(["--from-env"], settings=settings) == 0
     assert create_admin.main(["--from-env"], settings=settings) == 0  # idempotent
     out = capsys.readouterr().out
     assert "created" in out and "Nothing was changed" in out and "Karthik" not in out
     with db_session(settings):
-        assert queries.get_user_by_email("cli@example.com")["role"] == "ADMIN"
+        assert queries.get_user_by_email(ADMIN_EMAIL)["role"] == "ADMIN"
     monkeypatch.setenv("ADMIN_PASSWORD", "weak")
     monkeypatch.setenv("ADMIN_EMAIL", "cli2@example.com")
     assert create_admin.main(["--from-env"], settings=settings) == 1
@@ -1043,11 +1043,11 @@ def test_scheduler_runs_only_when_enabled(tmp_path):
 
 def test_notification_mark_read_only_affects_own(app, client):
     from services import notification_service as notif
-    make_user(app, "ADMIN", "a@x.edu")
+    make_user(app, "ADMIN", ADMIN_EMAIL)
     b = make_user(app, "ADMIN", "b@x.edu")
     with db_session(app.state.settings):
         nid = notif.notify(b["user_id"], notif.NEW_MESSAGE, "t", "m")
-    login(client, "a@x.edu", GOOD_PASSWORD)
+    login(client, ADMIN_EMAIL, GOOD_PASSWORD)
     assert api_post(client, f"/api/notifications/{nid}/read").status_code == 404
     assert db_one(app, "SELECT is_read FROM notifications WHERE id = ?", (nid,))["is_read"] == 0
     api_post(client, "/api/notifications/read-all")

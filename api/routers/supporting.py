@@ -1,12 +1,13 @@
 """/api/supporting/* - supporting-faculty relationships and the searches that feed them.
 
 A supporting relationship is the way a student and a faculty member who are NOT linked through an
-Admin class assignment can still talk / meet: one side requests, the OTHER side accepts. Faculty can only
-search (and invite) students of the classes they are actively assigned to.
+Admin class assignment can still talk / meet: one side requests, the OTHER side accepts. Faculty can
+discover every active student, while invitations and communication remain access-controlled.
 """
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 
 from api.deps import CurrentUser, items, ok, require_role, service_errors
 from api.routers._people import Cards
@@ -16,6 +17,10 @@ from services import supporting_service
 
 router = APIRouter(prefix="/api/supporting")
 _PARTICIPANT = require_role("STUDENT", "FACULTY")
+
+
+class SupportingRequestBody(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=1000)
 
 
 def _relationship_brief(rel_id, status, requested_by):
@@ -46,6 +51,7 @@ def relationship_item(row, user: CurrentUser, cards: Optional[Cards] = None) -> 
         "can_respond": row["status"] == "PENDING" and not mine,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "note": row["note"],
         "student": student,
         "faculty": faculty,
         "counterpart": dict(faculty, role="FACULTY") if is_student else dict(student, role="STUDENT"),
@@ -82,7 +88,7 @@ def search_faculty(q: str = Query("", max_length=100), user: CurrentUser = Depen
 
 @router.get("/students/search")
 def search_students(q: str = Query("", max_length=100), user: CurrentUser = Depends(require_role("FACULTY"))):
-    """Faculty: find students by USN or name, SCOPED to the classes the faculty member is actively assigned to."""
+    """Faculty: find active students by USN or name across every branch and section."""
     q = q.strip()
     rows = aq.search_students_in_faculty_scope(user["faculty_id"], q) if q else []
     relations = cq.relationships_for_faculty_students(user["faculty_id"], [r["id"] for r in rows])
@@ -91,11 +97,14 @@ def search_students(q: str = Query("", max_length=100), user: CurrentUser = Depe
     for row in rows:
         card = cq.get_student_card(row["id"])
         rel = relations.get(row["id"])
+        in_class = aq.is_student_in_faculty_scope(user["faculty_id"], row["id"])
+        accepted = rel and rel["status"] == "ACCEPTED"
         results.append(dict(
             cards.student(id=card["id"], usn=card["usn"], full_name=card["full_name"],
                           picture_path=card["profile_picture_path"], section_id=card["section_id"]),
             relationship=_relationship_brief(rel["id"], rel["status"], rel["requested_by"]) if rel else None,
-            can_request=_can_request(rel["status"] if rel else None),
+            has_access=in_class or accepted,
+            can_request=in_class and _can_request(rel["status"] if rel else None),
         ))
     return items(results, total=len(results), query=q)
 
@@ -103,9 +112,11 @@ def search_students(q: str = Query("", max_length=100), user: CurrentUser = Depe
 # ---------------------------------------------------------------- requests
 
 @router.post("/faculty/{faculty_id}/request", status_code=201)
-def request_faculty(faculty_id: int, user: CurrentUser = Depends(require_role("STUDENT"))):
+def request_faculty(faculty_id: int, body: Optional[SupportingRequestBody] = None,
+                    user: CurrentUser = Depends(require_role("STUDENT"))):
     with service_errors():
-        rel_id = supporting_service.student_request_faculty(user["student_id"], faculty_id)
+        note = ((body.note if body else "") or "").strip() or None
+        rel_id = supporting_service.student_request_faculty(user["student_id"], faculty_id, note)
     return ok("Supporting-faculty request sent.", id=rel_id, relationship=_relationship_response(rel_id, user))
 
 

@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS supporting_relationships (
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     faculty_id INTEGER NOT NULL REFERENCES faculty(id) ON DELETE CASCADE,
     requested_by TEXT NOT NULL CHECK (requested_by IN ('STUDENT', 'FACULTY')),
+    note TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ACCEPTED', 'REJECTED')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -86,6 +87,20 @@ CREATE TABLE IF NOT EXISTS supporting_relationships (
 );
 CREATE INDEX IF NOT EXISTS idx_supporting_student ON supporting_relationships(student_id, status);
 CREATE INDEX IF NOT EXISTS idx_supporting_faculty ON supporting_relationships(faculty_id, status);
+
+CREATE TABLE IF NOT EXISTS admin_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_text TEXT NOT NULL,
+    is_seen INTEGER NOT NULL DEFAULT 0,
+    seen_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (length(trim(message_text)) > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_admin_messages_pair ON admin_messages(sender_user_id, recipient_user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_admin_messages_recipient ON admin_messages(recipient_user_id, is_seen, created_at);
 
 CREATE TABLE IF NOT EXISTS chats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

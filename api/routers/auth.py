@@ -28,6 +28,11 @@ class LoginIn(CaptchaIn):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class AdminLoginIn(ApiModel):
+    identifier: Stripped = Field(min_length=1, max_length=254)
+    password: str = Field(min_length=1, max_length=1024)
+
+
 class StudentSignupIn(CaptchaIn):
     college_email: Stripped = Field(min_length=1, max_length=254)
     full_name: Stripped = Field(min_length=1, max_length=120)
@@ -111,6 +116,17 @@ def login(body: LoginIn, request: Request):
         except ValidationError as exc:  # the one generic message for every credential failure
             raise ApiError(401, "invalid_credentials", str(exc)) from exc
     token = session_service.start_session(request.session, row)  # fixation-safe: new session + new csrf
+    return ok("Welcome back!", user=user_payload(row), csrf_token=token)
+
+
+@router.post("/admin-login")
+def admin_login(body: AdminLoginIn, request: Request):
+    with service_errors():
+        try:
+            row = auth_service.authenticate_admin(body.identifier, body.password, ip=client_ip(request))
+        except ValidationError as exc:
+            raise ApiError(401, "invalid_credentials", str(exc)) from exc
+    token = session_service.start_session(request.session, row)
     return ok("Welcome back!", user=user_payload(row), csrf_token=token)
 
 

@@ -95,7 +95,7 @@ def test_login_validation_errors(client):
 
 def test_logout_clears_session_and_rotates_token(app):
     make_admin(app)
-    c = login_client(app, "admin@college.edu")
+    c = login_client(app, "mkkarthik0609@gmail.com")
     old = c.get("/api/auth/session").json()["csrf_token"]
     resp = api_post(c, "/api/auth/logout")
     assert resp.status_code == 200 and resp.json()["ok"] is True

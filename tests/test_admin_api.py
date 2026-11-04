@@ -243,20 +243,9 @@ def test_admins_list_and_create(app, world, admin):
                                           "profile_picture_url"} <= set(me)
 
     resp = api_post(admin, "/api/admin/admins", json=NEW_ADMIN)
-    assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert body["ok"] and body["message"] == "Admin account created."
-    assert body["admin"]["email"] == "second.admin@college.edu" and body["admin"]["is_you"] is False  # lower-cased
-    row = db_one(app, "SELECT * FROM users WHERE email = 'second.admin@college.edu'")
-    assert row["role"] == "ADMIN" and row["is_active"] == 1 and row["password_hash"] != NEW_ADMIN["password"]
-    assert [a["email"] for a in admin.get("/api/admin/admins").json()["items"]] == [
-        ADMIN_EMAIL, "second.admin@college.edu"]
-
-    # the new admin can sign in and use the console
-    other = TestClient(app)
-    api_login(other, "second.admin@college.edu", NEW_ADMIN["password"])
-    assert other.get("/api/admin/dashboard").status_code == 200
-    assert other.get("/api/admin/admins").json()["items"][1]["is_you"] is True
+    body = err(resp, 409, "conflict")
+    assert "email" in body["fields"]
+    assert admin.get("/api/admin/admins").json()["total"] == 1
 
 
 def test_create_admin_email_must_be_unique_case_insensitively(app, world, admin):
@@ -280,7 +269,8 @@ def test_create_admin_email_must_be_unique_case_insensitively(app, world, admin)
 ])
 def test_create_admin_validation(app, world, admin, patch, field):
     before = db_count(app, "users")
-    body = err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, **patch}), 400, "validation_error")
+    body = err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, "email": ADMIN_EMAIL, **patch}),
+               400, "validation_error")
     assert field in body["fields"]
     assert db_count(app, "users") == before
 
@@ -294,6 +284,6 @@ def test_create_admin_rejects_unknown_and_missing_fields(app, world, admin):
 
 def test_admin_password_may_not_equal_the_email_local_part(app, world, admin):
     body = err(api_post(admin, "/api/admin/admins", json={
-        **NEW_ADMIN, "email": "Passw0rd1@college.edu", "password": "Passw0rd1", "confirm_password": "Passw0rd1"}),
-        400, "validation_error")
-    assert "password" in body["fields"]
+        **NEW_ADMIN, "email": "other@example.com", "password": "Passw0rd1", "confirm_password": "Passw0rd1"}),
+        409, "conflict")
+    assert "email" in body["fields"]

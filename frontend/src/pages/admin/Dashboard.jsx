@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowUpRight, BookOpen, CalendarDays, CircleCheck, FlaskConical, Inbox, LayoutGrid, Layers, Link2, MessagesSquare, ShieldCheck, Users,
+  ArrowUpRight, BookOpen, CalendarDays, CircleCheck, Inbox, LayoutGrid, Layers, Link2, MessagesSquare, ShieldCheck, Users,
 } from "lucide-react";
 import { PageHeader, SectionHeading } from "@/components/app/PageHeader";
 import { Notice } from "@/components/app/Notice";
@@ -23,7 +23,7 @@ const QUICK = [
   { to: "/admin/academics", label: "Academic structure", hint: "Branches, departments, years and sections", icon: Layers },
   { to: "/admin/assignments", label: "Faculty assignments", hint: "Who teaches and mentors which class", icon: Link2 },
   { to: "/admin/chats", label: "Chats", hint: "Read-only view of every conversation", icon: MessagesSquare },
-  { to: "/admin/research", label: "Scheduling research", hint: "FCFS vs rule-based vs intelligent results", icon: FlaskConical },
+  { to: "/admin/faculty-messages", label: "Faculty messages", hint: "Read and reply to faculty", icon: MessagesSquare },
 ];
 
 function Attention({ to, count, title, children, icon: Icon }) {

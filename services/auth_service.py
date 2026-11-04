@@ -231,6 +231,27 @@ def authenticate(identifier, password, ip=None):
     return user
 
 
+def authenticate_admin(identifier, password, ip=None):
+    """Authenticate only the configured admin email.
+
+    In development/testing, the dedicated admin-login flow intentionally accepts any password
+    for the allowlisted demo account. Production always uses normal password verification.
+    """
+    ident = normalize_identifier(identifier)
+    allowed = get_settings().sole_admin_email.strip().lower()
+    if ident != allowed:
+        raise ValidationError(GENERIC_LOGIN_ERROR)
+    user = queries.get_user_by_email(allowed)
+    if not user or user["role"] != "ADMIN" or not user["is_active"]:
+        raise ValidationError(GENERIC_LOGIN_ERROR)
+    if not get_settings().admin_any_password_enabled:
+        return authenticate(identifier, password, ip=ip)
+    sq.clear_failures_for_identifier(ident)
+    sq.record_login_attempt(ident, ip, True)
+    sq.touch_last_login(user["id"])
+    return user
+
+
 def change_password(user_id, current_password, new_password, confirm_password, ip=None):
     """Change a logged-in user's password. Current-password guesses are throttled like logins."""
     throttle_key = f"\x01pwchange:{user_id}"
@@ -256,6 +277,8 @@ def ensure_admin(full_name, email, password):
     Returns True if a new admin was created, False if a user with that email already exists
     (an existing account and its password are never modified)."""
     email = validate_email((email or "").strip().lower(), "Email")
+    if email != get_settings().sole_admin_email.strip().lower():
+        raise ValidationError("Only the configured owner email can receive admin access.", "email")
     if queries.get_user_by_email(email):
         return False
     full_name = validate_required(full_name, "Full name")
@@ -275,4 +298,6 @@ def bootstrap_admin_from_env():
     password = os.environ.get("ADMIN_PASSWORD", "")
     if not (name and email and password):
         return "skipped"
+    if email != get_settings().sole_admin_email.strip().lower():
+        raise ValidationError("ADMIN_EMAIL must be the configured sole admin email.", "email")
     return "created" if ensure_admin(name, email, password) else "exists"

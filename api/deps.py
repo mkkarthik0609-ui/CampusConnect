@@ -91,6 +91,9 @@ def require_role(*roles: str):
         user = get_current_user(request)
         if user["role"] not in allowed:
             raise ApiError(403, "forbidden", "You do not have permission to do that.")
+        if "ADMIN" in allowed and user["role"] == "ADMIN":
+            if user["email"].strip().lower() != get_settings().sole_admin_email.strip().lower():
+                raise ApiError(403, "forbidden", "You do not have permission to do that.")
         return user
 
     dependency.__name__ = "require_role_" + "_".join(r.lower() for r in roles)

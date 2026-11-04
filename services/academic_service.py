@@ -9,6 +9,7 @@ from models import admin_queries
 
 DEFAULT_BRANCH = "CSE"
 DEFAULT_DEPARTMENTS = ["AIML", "AIDE", "GenAI", "Cybersecurity", "Blockchain", "IoT"]
+ADDITIONAL_DEPARTMENTS = ["CSE", "ECE", "EEE", "ISE", "MECH"]
 DEFAULT_YEARS = 4
 DEFAULT_SECTIONS = ["A", "B", "C"]
 
@@ -56,17 +57,23 @@ def _clean_name(text, what):
 # ---------- seeding / legacy backfill ----------
 
 def seed_default_structure():
-    """First start only: create CSE with its six departments, four years and sections A-C.
-    Admin can then edit everything; this never runs again once any branch exists."""
-    if aq.list_branches():
-        return
-    branch_id = aq.create_branch(DEFAULT_BRANCH)
+    """Create missing default departments on first start and on existing databases."""
+    branches = aq.list_branches()
+    branch_id = next((b["id"] for b in branches if b["name"] == DEFAULT_BRANCH), None)
+    if branch_id is None:
+        branch_id = aq.create_branch(DEFAULT_BRANCH)
+    existing = {d["name"].lower(): d for d in aq.list_departments(branch_id)}
     for dept in DEFAULT_DEPARTMENTS:
+        if dept.lower() in existing:
+            continue
         dept_id = aq.create_department(branch_id, dept)
         for n in range(1, DEFAULT_YEARS + 1):
             year_id = aq.create_year(dept_id, year_label(n), n)
             for sec in DEFAULT_SECTIONS:
                 aq.create_section(year_id, sec)
+    for dept in ADDITIONAL_DEPARTMENTS:
+        if dept.lower() not in existing:
+            aq.create_department(branch_id, dept)
 
 
 def _legacy_combo(branch, department, year, section):

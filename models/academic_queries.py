@@ -292,17 +292,16 @@ def list_students_for_section(section_id):
 
 
 def search_students_in_faculty_scope(faculty_id, query, limit=30):
-    like = f"%{query}%"
+    escaped = (query or "").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = f"%{escaped}%"
     return get_db().execute(
         f"""SELECT DISTINCT st.id, st.usn, st.branch, st.department, st.year, st.section,
                    u.full_name, u.profile_picture_path
             FROM students st
             JOIN users u ON u.id = st.user_id AND u.is_active = 1
-            JOIN faculty_assignments fa ON fa.section_id = st.section_id AND fa.is_active = 1
-            JOIN sections s ON s.id = fa.section_id {_CHAIN_ACTIVE_JOINS}
-            WHERE fa.faculty_id = ? AND {_CHAIN_ACTIVE_WHERE} AND (st.usn LIKE ? OR u.full_name LIKE ?)
+            WHERE st.usn LIKE ? ESCAPE '\' OR u.full_name LIKE ? ESCAPE '\'
             ORDER BY st.usn LIMIT ?""",
-        (faculty_id, like, like, limit),
+        (like, like, limit),
     ).fetchall()
 
 

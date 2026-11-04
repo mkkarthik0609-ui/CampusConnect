@@ -7,7 +7,7 @@ class SupportingError(Exception):
     pass
 
 
-def student_request_faculty(student_id, faculty_id):
+def student_request_faculty(student_id, faculty_id, note=None):
     faculty_row = queries.get_faculty_with_user(faculty_id)
     if not faculty_row or not queries.get_user_by_id(faculty_row["user_id"])["is_active"]:
         raise SupportingError("Faculty member not found.")
@@ -16,7 +16,7 @@ def student_request_faculty(student_id, faculty_id):
         raise SupportingError("A supporting relationship request already exists with this faculty member.")
     # A previously REJECTED pair is re-opened (UNIQUE(student_id, faculty_id)): the same row goes back to
     # PENDING and ``requested_by`` is updated to the new requester.
-    rel_id = queries.create_supporting_request(student_id, faculty_id, "STUDENT")
+    rel_id = queries.create_supporting_request(student_id, faculty_id, "STUDENT", note)
     faculty = queries.get_faculty_by_id(faculty_id)
     student = queries.get_student_with_user(student_id)
     notif.notify(

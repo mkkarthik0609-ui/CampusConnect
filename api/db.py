@@ -113,6 +113,38 @@ def _migrate(db: sqlite3.Connection) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS idx_students_section ON students(section_id)")
     if "last_login_at" not in _columns(db, "users"):
         db.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT")
+    if "note" not in _columns(db, "supporting_relationships"):
+        db.execute("ALTER TABLE supporting_relationships ADD COLUMN note TEXT")
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS admin_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            message_text TEXT NOT NULL,
+            is_seen INTEGER NOT NULL DEFAULT 0,
+            seen_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            CHECK (length(trim(message_text)) > 0)
+        )"""
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_admin_messages_pair ON admin_messages(sender_user_id, recipient_user_id, created_at)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_admin_messages_recipient ON admin_messages(recipient_user_id, is_seen, created_at)")
+
+
+def _reconcile_sole_admin(db: sqlite3.Connection, settings: Settings) -> None:
+    """Keep the configured owner as the only active admin account."""
+    email = settings.sole_admin_email.strip().lower()
+    db.execute(
+        "UPDATE users SET is_active = 0, updated_at = datetime('now') "
+        "WHERE role = 'ADMIN' AND lower(email) <> ?",
+        (email,),
+    )
+    db.execute(
+        "UPDATE users SET role = 'ADMIN', is_active = 1, updated_at = datetime('now') "
+        "WHERE lower(email) = ?",
+        (email,),
+    )
 
 
 def init_db(settings: Optional[Settings] = None) -> None:
@@ -129,6 +161,7 @@ def init_db(settings: Optional[Settings] = None) -> None:
         with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
             db.executescript(f.read())
         _migrate(db)
+        _reconcile_sole_admin(db, settings)
         db.commit()
         from models import security_queries
         security_queries.ensure_schema()

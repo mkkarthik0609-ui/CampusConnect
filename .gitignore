@@ -48,3 +48,4 @@ graphify-out/
 .idea/
 .vscode/
 *.log
+database.db.corrupt-*
