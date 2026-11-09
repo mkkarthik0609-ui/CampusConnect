@@ -1,7 +1,8 @@
 /**
  * THE route table. Feature agents: to add or replace a page, create/replace the file under
  * src/pages/<role>/ and (only if it is a NEW route) add ONE line to the matching array below.
- * Every page is lazy-loaded: `page(() => import("@/pages/student/Meetings"))`.
+ * Every page is lazy-loaded: `page(() => import("@/pages/student/Meetings"))`. The big layouts (AppShell, AuthLayout) are lazy too;
+ * only the guards, loaders and error boundaries are in the entry bundle (they must work when a chunk fails to load).
  *
  * Guards (see src/auth/guards.jsx):
  *   public            no guard                              /
@@ -14,12 +15,13 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { AppRedirect, GuestOnly, RequireAuth, RequireRole } from "@/auth/guards";
-import { AppShell } from "@/components/app/AppShell";
-import { AuthLayout } from "@/components/app/AuthLayout";
 import { PageLoader } from "@/components/app/PageLoader";
 import { RouteAnnouncer } from "@/components/app/RouteAnnouncer";
-import { RouteError } from "@/pages/shared/ServerError";
-import NotFoundRoute from "@/pages/shared/NotFound";
+import { RouteProgress } from "@/components/app/RouteProgress";
+import { RouteErrorBoundary } from "@/components/app/ErrorBoundary";
+
+const AppShell = lazy(() => import("@/components/app/AppShell").then((m) => ({ default: m.AppShell })));
+const AuthLayout = lazy(() => import("@/components/app/AuthLayout").then((m) => ({ default: m.AuthLayout })));
 
 /** Lazy route element. `page(() => import("@/pages/x/Y"))` -> <Y/> in its own chunk. */
 function page(loader) {
@@ -89,6 +91,7 @@ function RootLayout() {
       <Suspense fallback={<PageLoader />}>
         <Outlet />
       </Suspense>
+      <RouteProgress />
       <RouteAnnouncer />
     </>
   );
@@ -97,7 +100,7 @@ function RootLayout() {
 export const routes = [
   {
     element: <RootLayout />,
-    errorElement: <RouteError />,
+    errorElement: <RouteErrorBoundary />,
     children: [
       // public landing (also reachable when signed in; its header then offers "Open dashboard")
       { path: "/", element: page(() => import("@/pages/site/Landing")) },
@@ -128,16 +131,22 @@ export const routes = [
           {
             element: <AppShell />,
             children: [
-              ...sharedRoutes,
-              roleSection("student", "STUDENT", studentRoutes),
-              roleSection("faculty", "FACULTY", facultyRoutes),
-              roleSection("admin", "ADMIN", adminRoutes),
+              {
+                // A page that throws keeps the sidebar: the error renders in the page area (no path, same URLs)
+                errorElement: <RouteErrorBoundary inShell />,
+                children: [
+                  ...sharedRoutes,
+                  roleSection("student", "STUDENT", studentRoutes),
+                  roleSection("faculty", "FACULTY", facultyRoutes),
+                  roleSection("admin", "ADMIN", adminRoutes),
+                ],
+              },
             ],
           },
         ],
       },
 
-      { path: "*", element: <NotFoundRoute /> },
+      { path: "*", element: page(() => import("@/pages/shared/NotFound")) },
     ],
   },
 ];

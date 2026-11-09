@@ -1,11 +1,11 @@
 import { cn } from "@/lib/utils";
 
 const TONES = {
-  warn: "bg-warn text-warn-ink",
-  ok: "bg-ok text-ok-ink",
-  danger: "bg-danger text-danger-ink",
-  info: "bg-info text-info-ink",
-  neutral: "bg-neutral text-neutral-ink",
+  warn: "border-warn-line bg-warn text-warn-ink",
+  ok: "border-ok-line bg-ok text-ok-ink",
+  danger: "border-danger-line bg-danger text-danger-ink",
+  info: "border-info-line bg-info text-info-ink",
+  neutral: "border-line bg-neutral text-neutral-ink",
 };
 
 const STATUS_TONE = {
@@ -31,7 +31,7 @@ export function StatusPill({ status, label, tone, className }) {
     <span
       data-status={key}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full py-[0.18rem] pr-2.5 pl-2 text-xs leading-[1.3] font-bold tracking-[0.04em] whitespace-nowrap uppercase",
+        "inline-flex items-center gap-1.5 rounded-full border py-[0.15rem] pr-2.5 pl-2 text-[0.6875rem] leading-[1.3] font-medium tracking-[0.08em] whitespace-nowrap uppercase",
         TONES[resolved],
         className,
       )}

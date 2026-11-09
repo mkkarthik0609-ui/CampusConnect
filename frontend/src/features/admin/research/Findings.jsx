@@ -18,12 +18,12 @@ export function Findings({ data }) {
   return (
     <section aria-label="What this shows and what it does not" className="mb-4">
       <SectionHeading title="What this shows, and what it does not" />
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-lg border border-ok-line bg-card p-5">
           <h3 className="m-0 mb-3 flex items-center gap-2 text-base font-bold text-ok-ink">
             <CircleCheck aria-hidden="true" className="size-5" />What the data supports
           </h3>
-          <ul className="m-0 grid gap-2.5 pl-5 text-[0.9375rem]">
+          <ul className="m-0 grid grid-cols-1 gap-2.5 pl-5 text-[0.9375rem]">
             {vf?.served_meetings ? (
               <li>
                 Timetable-aware scheduling with flexible meeting lengths holds about {fmtPct(vf.served_meetings.pct_improvement)} more meetings, ends class clashes and cuts
@@ -47,7 +47,7 @@ export function Findings({ data }) {
           <h3 className="m-0 mb-3 flex items-center gap-2 text-base font-bold text-warn-ink">
             <CircleAlert aria-hidden="true" className="size-5" />Honest limits
           </h3>
-          <ul className="m-0 grid gap-2.5 pl-5 text-[0.9375rem]">
+          <ul className="m-0 grid grid-cols-1 gap-2.5 pl-5 text-[0.9375rem]">
             {worseWait ? (
               <li>
                 <strong>The weakest metric is waiting time.</strong> Intelligent is {fmtPct(worseWait.pct_improvement)} {worseWait.pct_improvement < 0 ? "worse" : "better"} than rule-based on average wait

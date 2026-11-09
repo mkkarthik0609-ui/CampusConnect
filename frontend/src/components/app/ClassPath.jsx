@@ -19,7 +19,7 @@ export function ClassPath({ cls, label, branch, department, year, section, size 
     <span
       role="group"
       aria-label={`Class: ${parts.join(", ")}`}
-      className={cn("inline-flex flex-wrap items-center gap-x-1 gap-y-1 font-semibold text-ink-2", className)}
+      className={cn("inline-flex flex-wrap items-center gap-x-1 gap-y-1 font-medium text-ink-2", className)}
     >
       {parts.map((part, i) => {
         const last = i === parts.length - 1;
@@ -30,7 +30,7 @@ export function ClassPath({ cls, label, branch, department, year, section, size 
               className={cn(
                 "inline-block rounded-full leading-[1.4]",
                 size === "lg" ? "px-3 py-[0.22rem] text-[0.9375rem]" : "px-2.5 py-[0.12rem] text-[0.8125rem]",
-                last ? "bg-primary-soft font-bold text-primary-ink" : "bg-sunken text-ink-2",
+                last ? "border border-foreground bg-foreground font-medium text-background" : "border border-line-strong text-ink-2",
               )}
             >
               {part}

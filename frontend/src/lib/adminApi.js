@@ -22,6 +22,7 @@ export const adminKeys = {
   chat: (id) => ["admin", "chats", String(id)],
   permissions: ["admin", "permission-requests"],
   admins: ["admin", "admins"],
+  passkeys: ["admin", "passkeys"],
   research: ["research", "results"],
 };
 
@@ -54,12 +55,24 @@ export const adminApi = {
   removeRegistration: (id) => api.post(`${A}/students/${id}/remove-registration`, {}),
   faculty: () => api.get(`${A}/faculty`),
   admins: () => api.get(`${A}/admins`),
+  /** { full_name, email } -> { admin, temporary_password } (the password is shown once) */
   createAdmin: (body) => api.post(`${A}/admins`, body),
+  setAdminActive: (id, active) => api.post(`${A}/admins/${id}/active`, { active }),
+  /** -> { temporary_password } */
+  resetAdminPassword: (id) => api.post(`${A}/admins/${id}/reset-password`, {}),
+  revokeAdminPasskeys: (id) => api.delete(`${A}/admins/${id}/passkeys`),
+
+  // ---- my passkeys (WebAuthn) ----
+  passkeys: () => api.get(`${A}/passkeys`),
+  /** -> { options } */
+  passkeyOptions: () => api.post(`${A}/passkeys/options`, {}),
+  addPasskey: (credential, label) => api.post(`${A}/passkeys/verify`, { credential, label }),
+  removePasskey: (id) => api.delete(`${A}/passkeys/${id}`),
 
   // ---- oversight ----
   meetings: (status) => api.get(`${A}/meetings`, { params: { status } }),
   chats: () => api.get(`${A}/chats`),
-  chat: (id) => api.get(`${A}/chats/${id}`),
+  chat: (id, { afterId = 0, since } = {}) => api.get(`${A}/chats/${id}`, { params: { after_id: afterId || undefined, updated_since: since } }),
   permissionRequests: () => api.get(`${A}/permission-requests`),
   decidePermission: (id, decision) => api.post(`${A}/permission-requests/${id}/decide`, { decision }),
 };

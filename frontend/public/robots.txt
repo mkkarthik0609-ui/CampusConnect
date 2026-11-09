@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /admin
+Disallow: /admin-login
+Disallow: /student
+Disallow: /faculty
+Disallow: /api
+Disallow: /uploads
+
+Sitemap: https://campus-connect-network.vercel.app/sitemap.xml

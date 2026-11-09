@@ -35,7 +35,25 @@
       ]
     },
     {
-      "source": "/((?!assets/|api/|uploads/|healthz).*)",
+      "source": "/(favicon.svg|apple-touch-icon.png|og-image.png|icon-192.png|icon-512.png|icon-maskable-512.png|hero.mp4)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400, stale-while-revalidate=604800"
+        }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json"
+        }
+      ]
+    },
+    {
+      "source": "/((?!assets/|api/|uploads/|healthz|favicon.svg|apple-touch-icon.png|og-image.png|icon-|hero.mp4).*)",
       "headers": [
         {
           "key": "Cache-Control",

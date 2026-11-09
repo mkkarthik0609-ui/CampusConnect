@@ -33,14 +33,14 @@ export function DataTable({ columns, rows, rowKey = (r) => r.id, caption, loadin
   const showEmpty = !loading && (!rows || rows.length === 0);
   if (showEmpty) {
     return (
-      <div className={cn("rounded-lg border bg-card shadow-sm", className)}>
+      <div className={cn("rounded-xl border bg-card", className)}>
         <EmptyState {...(empty || { title: "Nothing here yet" })} />
       </div>
     );
   }
 
   return (
-    <div className={cn("overflow-hidden rounded-lg border bg-card shadow-sm max-sm:overflow-visible max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none", className)}>
+    <div className={cn("overflow-hidden rounded-xl border bg-card max-sm:overflow-visible max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent", className)}>
       <Table role="table" className="max-sm:block" aria-busy={loading || undefined}>
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <TableHeader role="rowgroup" className="max-sm:sr-only">
@@ -97,7 +97,7 @@ export function DataTable({ columns, rows, rowKey = (r) => r.id, caption, loadin
 }
 
 const rowMobile =
-  "max-sm:mb-3 max-sm:block max-sm:rounded-lg max-sm:border max-sm:bg-card max-sm:px-4 max-sm:py-1.5 max-sm:shadow-sm max-sm:hover:bg-card";
+  "max-sm:mb-3 max-sm:block max-sm:rounded-xl max-sm:border max-sm:bg-card max-sm:px-4 max-sm:py-1.5 max-sm:hover:bg-card";
 
 const cellMobile =
-  "max-sm:flex max-sm:items-start max-sm:justify-between max-sm:gap-3 max-sm:border-b max-sm:px-0 max-sm:py-2.5 max-sm:text-right last:max-sm:border-b-0 max-sm:before:max-w-[42%] max-sm:before:pt-0.5 max-sm:before:text-left max-sm:before:text-[0.8125rem] max-sm:before:font-semibold max-sm:before:text-muted-foreground max-sm:before:content-[attr(data-label)] max-sm:data-[label='']:before:hidden";
+  "max-sm:flex max-sm:items-start max-sm:justify-between max-sm:gap-3 max-sm:border-b max-sm:px-0 max-sm:py-2.5 max-sm:text-right last:max-sm:border-b-0 max-sm:before:max-w-[42%] max-sm:before:pt-0.5 max-sm:before:text-left max-sm:before:text-[0.6875rem] max-sm:before:font-medium max-sm:before:tracking-[0.1em] max-sm:before:uppercase max-sm:before:text-muted-foreground max-sm:before:content-[attr(data-label)] max-sm:data-[label='']:before:hidden";

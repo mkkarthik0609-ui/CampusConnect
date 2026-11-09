@@ -6,12 +6,12 @@ import { AuthCard } from "@/components/app/AuthLayout";
 import { FormField } from "@/components/app/FormField";
 import { PasswordInput } from "@/components/app/PasswordInput";
 import { SubmitButton } from "@/components/app/SubmitButton";
-import { ClassPicker } from "@/components/app/ClassPicker";
+import { ClassPicker, classPayload } from "@/components/app/ClassPicker";
 import { Notice } from "@/components/app/Notice";
 import { CaptchaField } from "@/components/app/CaptchaField";
 import { authApi } from "@/lib/endpoints";
 import { ApiError, errorMessage } from "@/lib/api";
-import { usePageTitle } from "@/hooks/usePageTitle";
+import { useMeta } from "@/hooks/useMeta";
 
 const PASSWORD_RULE = "At least 8 characters with an uppercase letter, a lowercase letter and a digit.";
 
@@ -20,13 +20,14 @@ const PASSWORD_RULE = "At least 8 characters with an uppercase letter, a lowerca
  * -> POST /api/auth/signup/student. The captcha is single use, so it is reloaded after every failed submit.
  */
 export default function SignupStudent() {
-  usePageTitle("Student registration");
+  useMeta({ title: "Student registration", description: "Create your CampusConnect student account with your college email and choose your class." });
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState("");
   const [form, setForm] = useState({ college_email: "", full_name: "", usn: "", phone: "", personal_email: "", password: "", confirm_password: "" });
   const [sectionId, setSectionId] = useState("");
+  const [classInfo, setClassInfo] = useState(null);
   const [captcha, setCaptcha] = useState({ id: "", answer: "" });
   const [captchaKey, setCaptchaKey] = useState(0);
 
@@ -38,7 +39,7 @@ export default function SignupStudent() {
     for (const [key, label] of [["college_email", "college email"], ["full_name", "full name"], ["usn", "USN"], ["phone", "phone number"], ["personal_email", "personal email"], ["password", "password"]]) {
       if (!String(form[key]).trim()) next[key] = `Enter your ${label}.`;
     }
-    if (!sectionId) next.section_id = "Choose your branch, department, year and section.";
+    if (!sectionId && !classInfo?.custom) next.section_id = "Choose your branch, department, year and section.";
     if (form.password && form.password !== form.confirm_password) next.confirm_password = "Passwords do not match.";
     if (!captcha.answer.trim()) next.captcha = "Type the characters shown in the image.";
     if (Object.keys(next).length) { setErrors(next); setFormError("Check the highlighted fields."); return; }
@@ -52,7 +53,7 @@ export default function SignupStudent() {
         usn: form.usn.trim(),
         phone: form.phone.trim(),
         personal_email: form.personal_email.trim(),
-        section_id: Number(sectionId),
+        ...classPayload(sectionId, classInfo),
         password: form.password,
         confirm_password: form.confirm_password,
         captcha_id: captcha.id,
@@ -78,9 +79,9 @@ export default function SignupStudent() {
       footer={<span>Already have an account? <Link to="/login">Sign in</Link></span>}
     >
       {formError ? <Notice tone="danger" className="mb-4">{formError}</Notice> : null}
-      <form onSubmit={register} noValidate className="grid gap-5">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormField label="College email" required error={errors.college_email} className="sm:col-span-2">
+      <form onSubmit={register} noValidate className="grid gap-8">
+        <div className="grid gap-6 @lg:grid-cols-2">
+          <FormField label="College email" required error={errors.college_email} className="@lg:col-span-2">
             <Input type="email" autoFocus autoComplete="email" inputMode="email" placeholder="you@college.edu" value={form.college_email} onChange={set("college_email")} />
           </FormField>
           <FormField label="Full name" required error={errors.full_name}>
@@ -97,17 +98,17 @@ export default function SignupStudent() {
           </FormField>
         </div>
 
-        <section aria-labelledby="class-h" className="border-t pt-5">
-          <h2 id="class-h" className="mb-1 text-xl">Your class</h2>
+        <section aria-labelledby="class-h" className="border-t pt-8">
+          <h2 id="class-h" className="mb-2 text-2xl font-light">Your class</h2>
           <p className="mb-4 text-sm text-muted-foreground">
             Choose carefully. You cannot change this yourself later. If you pick the wrong class, contact Admin to remove the registration and register again.
           </p>
-          <ClassPicker value={sectionId} onChange={(id) => { setSectionId(id); setErrors((x) => ({ ...x, section_id: "" })); }} error={errors.section_id} />
+          <ClassPicker allowCustom value={sectionId} onChange={(id, info) => { setSectionId(id); setClassInfo(info); setErrors((x) => ({ ...x, section_id: "" })); }} error={errors.section_id} />
         </section>
 
-        <section aria-labelledby="pw-h" className="border-t pt-5">
-          <h2 id="pw-h" className="mb-4 text-xl">Password</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
+        <section aria-labelledby="pw-h" className="border-t pt-8">
+          <h2 id="pw-h" className="mb-5 text-2xl font-light">Password</h2>
+          <div className="grid gap-6 @lg:grid-cols-2">
             <FormField label="Campus Connect password" required hint={PASSWORD_RULE} error={errors.password}>
               <PasswordInput autoComplete="new-password" minLength={8} value={form.password} onChange={set("password")} />
             </FormField>
@@ -117,7 +118,7 @@ export default function SignupStudent() {
           </div>
         </section>
 
-        <section className="border-t pt-5">
+        <section className="border-t pt-8">
           <CaptchaField resetKey={captchaKey} onChange={setCaptcha} error={errors.captcha} />
         </section>
 

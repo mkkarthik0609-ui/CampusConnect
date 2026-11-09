@@ -44,8 +44,11 @@ services:
       # Use "1" if a custom domain points straight at Render and Vercel is not in the path.
       - key: TRUST_PROXY_HOPS
         value: "2"
-      # First-admin bootstrap (idempotent, never overwrites an existing password).
+      # First-admin bootstrap (idempotent, never overwrites an existing password). ADMIN_EMAIL must be
+      # the primary admin (PRIMARY_ADMIN_EMAIL, default mkkarthik0609@gmail.com); that admin appoints more.
       # Fill ADMIN_* in the Render dashboard; the values are NOT stored in this file.
+      # Optional: PRIMARY_ADMIN_EMAIL and WEBAUTHN_ALLOWED_ORIGINS (comma separated browser origins that
+      # may use admin passkeys; default https://campus-connect-network.vercel.app + localhost dev ports).
       - key: BOOTSTRAP_ADMIN
         value: "1"
       - key: ADMIN_NAME

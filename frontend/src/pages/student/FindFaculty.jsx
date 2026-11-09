@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader, SectionHeading } from "@/components/app/PageHeader";
 import { EmptyState } from "@/components/app/EmptyState";
-import { ListSkeleton } from "@/components/app/PageLoader";
+import { CardListSkeleton } from "@/components/app/skeletons";
 import { Notice } from "@/components/app/Notice";
 import { StatusPill } from "@/components/app/StatusPill";
 import { SubmitButton } from "@/components/app/SubmitButton";
@@ -78,7 +78,7 @@ export default function FindFaculty() {
           </p>
           <div className={panel}>
             {search.isPending ? (
-              <ListSkeleton rows={3} className="p-3" />
+              <CardListSkeleton rows={3} className="rounded-none border-0 shadow-none" />
             ) : search.isError ? (
               <div className="p-3">
                 <Notice tone="danger" title="Search failed">
@@ -113,7 +113,7 @@ export default function FindFaculty() {
         <SectionHeading title="Your supporting requests" />
         <div className={panel}>
           {requests.isPending ? (
-            <ListSkeleton rows={2} className="p-3" />
+            <CardListSkeleton rows={2} className="rounded-none border-0 shadow-none" />
           ) : requests.isError ? (
             <div className="p-3">
               <Notice tone="danger" title="Could not load your requests">{requests.error.message}</Notice>

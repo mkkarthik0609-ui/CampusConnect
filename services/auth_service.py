@@ -1,5 +1,6 @@
 import os
 import re
+import secrets
 
 from werkzeug.security import generate_password_hash, check_password_hash
 from api.settings import get_settings
@@ -102,17 +103,19 @@ def register_student(data):
     personal_email, college_email, password. Returns created user id."""
     full_name = validate_required(data.get("full_name"), "Full name", "full_name")
     usn = validate_usn(data.get("usn"))
-    try:
-        combo = academic_service.resolve_section(data.get("section_id"))
-    except AcademicError as e:
-        raise ValidationError(str(e), "section_id")
     phone = validate_phone(data.get("phone"))
     personal_email = validate_email(data.get("personal_email"), "Personal email", "personal_email")
     college_email = validate_email(data.get("college_email"), "College email", "college_email")
     password_hash = hash_password(data.get("password"), disallow=(college_email, usn, personal_email))
 
-    if queries.get_user_by_email(college_email):
+    # The primary admin's address is reserved: public signup must never be able to take it first.
+    if queries.get_user_by_email(college_email) or get_settings().is_primary_admin(college_email):
         raise ConflictError("An account with this college email already exists.", "college_email")
+    # Last, so a typed class is only created once everything else is valid.
+    try:
+        combo = academic_service.resolve_class(data.get("section_id"), data.get("custom_class"))
+    except AcademicError as e:
+        raise ValidationError(str(e), "section_id")
 
     user_id = queries.create_user("STUDENT", college_email, password_hash, full_name)
     student_id = queries.create_student(
@@ -161,7 +164,7 @@ def register_faculty(data):
         raise ValidationError("At least one subject is required.", "subjects")
     if queries.get_faculty_code_exists(faculty_code):
         raise ConflictError("This Faculty ID is already registered.", "faculty_code")
-    if queries.get_user_by_email(professional_email):
+    if queries.get_user_by_email(professional_email) or get_settings().is_primary_admin(professional_email):
         raise ConflictError("An account with this professional email already exists.", "professional_email")
 
     user_id = queries.create_user("FACULTY", professional_email, password_hash, full_name)
@@ -211,9 +214,10 @@ def login_requires_captcha(identifier, ip=None):
     return bool(ip and sq.count_recent_failures_for_ip(ip, window) >= cfg.login_captcha_after_ip_failures)
 
 
-def authenticate(identifier, password, ip=None):
-    """Verify credentials for an email / Faculty ID / USN. Raises ValidationError with one identical
-    message for unknown user, wrong password and inactive account; raises LockoutError when throttled.
+def authenticate(identifier, password, ip=None, role=None):
+    """Verify credentials for an email / Faculty ID / USN (optionally only for accounts of `role`).
+    Raises ValidationError with one identical message for unknown user, wrong password, wrong role and
+    inactive account; raises LockoutError when throttled.
     Failures are recorded per identifier and per IP; a success clears the identifier's counter."""
     ident = normalize_identifier(identifier)
     if _is_locked_out(ident, ip):
@@ -221,7 +225,7 @@ def authenticate(identifier, password, ip=None):
 
     user = queries.get_user_by_identifier(identifier)
     password_ok = verify_password(user["password_hash"] if user else _dummy_hash(), password or "")
-    if not user or not password_ok or not user["is_active"]:
+    if not user or not password_ok or not user["is_active"] or (role and user["role"] != role):
         sq.record_login_attempt(ident, ip, False)
         raise ValidationError(GENERIC_LOGIN_ERROR)
 
@@ -232,24 +236,9 @@ def authenticate(identifier, password, ip=None):
 
 
 def authenticate_admin(identifier, password, ip=None):
-    """Authenticate only the configured admin email.
-
-    In development/testing, the dedicated admin-login flow intentionally accepts any password
-    for the allowlisted demo account. Production always uses normal password verification.
-    """
-    ident = normalize_identifier(identifier)
-    allowed = get_settings().sole_admin_email.strip().lower()
-    if ident != allowed:
-        raise ValidationError(GENERIC_LOGIN_ERROR)
-    user = queries.get_user_by_email(allowed)
-    if not user or user["role"] != "ADMIN" or not user["is_active"]:
-        raise ValidationError(GENERIC_LOGIN_ERROR)
-    if not get_settings().admin_any_password_enabled:
-        return authenticate(identifier, password, ip=ip)
-    sq.clear_failures_for_identifier(ident)
-    sq.record_login_attempt(ident, ip, True)
-    sq.touch_last_login(user["id"])
-    return user
+    """Email + password sign-in for an active ADMIN account: the real hash check and throttling, in
+    every environment."""
+    return authenticate(identifier, password, ip=ip, role="ADMIN")
 
 
 def change_password(user_id, current_password, new_password, confirm_password, ip=None):
@@ -277,8 +266,6 @@ def ensure_admin(full_name, email, password):
     Returns True if a new admin was created, False if a user with that email already exists
     (an existing account and its password are never modified)."""
     email = validate_email((email or "").strip().lower(), "Email")
-    if email != get_settings().sole_admin_email.strip().lower():
-        raise ValidationError("Only the configured owner email can receive admin access.", "email")
     if queries.get_user_by_email(email):
         return False
     full_name = validate_required(full_name, "Full name")
@@ -298,6 +285,66 @@ def bootstrap_admin_from_env():
     password = os.environ.get("ADMIN_PASSWORD", "")
     if not (name and email and password):
         return "skipped"
-    if email != get_settings().sole_admin_email.strip().lower():
-        raise ValidationError("ADMIN_EMAIL must be the configured sole admin email.", "email")
+    if not get_settings().is_primary_admin(email):
+        raise ValidationError("ADMIN_EMAIL must be the PRIMARY_ADMIN_EMAIL address.", "email")
     return "created" if ensure_admin(name, email, password) else "exists"
+
+
+# ---------------------------------------------------------------- admin account management
+# Every admin may manage every other admin; only the primary admin is protected.
+
+def generate_temp_password():
+    """A strong one-time password (16 chars, no look-alike characters) that satisfies the policy."""
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+    while True:
+        password = "".join(secrets.choice(alphabet) for _ in range(16))
+        if re.search(r"[A-Z]", password) and re.search(r"[a-z]", password) and re.search(r"[0-9]", password):
+            return password
+
+
+def _managed_admin(admin_id):
+    admin = queries.get_user_by_id(admin_id)
+    if not admin or admin["role"] != "ADMIN":
+        raise ValidationError("Admin account not found.")
+    return admin
+
+
+def _not_primary(admin):
+    if get_settings().is_primary_admin(admin["email"]):
+        raise ValidationError("The primary administrator account is protected and cannot be changed this way.")
+
+
+def create_admin_account(full_name, email):
+    """Create an ADMIN with a generated temporary password. Returns (user_id, temporary_password); the
+    password is shown to the creator once and is never stored in clear text."""
+    full_name = validate_required(full_name, "Full name", "full_name")
+    email = validate_email(email, "Email", "email")
+    if queries.get_user_by_email(email):
+        raise ConflictError("An account with this email already exists.", "email")
+    temp = generate_temp_password()
+    return queries.create_user("ADMIN", email, hash_password(temp, disallow=(email,)), full_name), temp
+
+
+def set_admin_active(acting_admin_id, admin_id, active):
+    admin = _managed_admin(admin_id)
+    if not active:
+        _not_primary(admin)
+        if admin["id"] == acting_admin_id:
+            raise ValidationError("You cannot deactivate your own account.")
+    sq.set_user_active(admin["id"], active)
+
+
+def reset_admin_password(admin_id):
+    """Replace an admin's password with a new temporary one (returned once) and lift any sign-in lockout."""
+    admin = _managed_admin(admin_id)
+    _not_primary(admin)
+    temp = generate_temp_password()
+    queries.update_user_password(admin["id"], hash_password(temp, disallow=(admin["email"],)))
+    sq.clear_failures_for_identifier(normalize_identifier(admin["email"]))
+    return temp
+
+
+def revoke_admin_passkeys(admin_id):
+    admin = _managed_admin(admin_id)
+    _not_primary(admin)
+    return sq.delete_passkeys_for_user(admin["id"])

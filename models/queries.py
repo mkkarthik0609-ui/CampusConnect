@@ -216,7 +216,7 @@ def search_faculty(query, limit=20):
     return get_db().execute(
         """SELECT f.id, f.faculty_code, f.department, u.full_name, u.profile_picture_path
            FROM faculty f JOIN users u ON u.id = f.user_id
-           WHERE f.faculty_code LIKE ? ESCAPE '\' OR u.full_name LIKE ? ESCAPE '\'
+           WHERE f.faculty_code LIKE ? ESCAPE '\\' OR u.full_name LIKE ? ESCAPE '\\'
            ORDER BY u.full_name LIMIT ?""",
         (like, like, limit),
     ).fetchall()
@@ -305,57 +305,61 @@ def list_pending_supporting_requests_for_faculty(faculty_id):
     ).fetchall()
 
 
-def create_admin_message(sender_user_id, recipient_user_id, message_text):
+def create_admin_message(sender_user_id, recipient_user_id, message_text, reply_to_id=None):
     db = get_db()
     cur = db.execute(
-        "INSERT INTO admin_messages (sender_user_id, recipient_user_id, message_text) VALUES (?, ?, ?)",
-        (sender_user_id, recipient_user_id, message_text),
+        "INSERT INTO admin_messages (sender_user_id, recipient_user_id, message_text, reply_to_id) VALUES (?, ?, ?, ?)",
+        (sender_user_id, recipient_user_id, message_text, reply_to_id),
     )
     db.commit()
     return cur.lastrowid
 
 
-def list_admin_messages(user_id, other_user_id=None):
-    db = get_db()
-    if other_user_id is None:
-        return db.execute(
-            """SELECT am.*, su.full_name AS sender_name, su.role AS sender_role,
-                      ru.full_name AS recipient_name, ru.role AS recipient_role
-               FROM admin_messages am
-               JOIN users su ON su.id = am.sender_user_id
-               JOIN users ru ON ru.id = am.recipient_user_id
-               WHERE am.sender_user_id = ? OR am.recipient_user_id = ?
-               ORDER BY am.created_at, am.id""",
-            (user_id, user_id),
-        ).fetchall()
-    return db.execute(
-        """SELECT am.*, su.full_name AS sender_name, su.role AS sender_role,
-                  ru.full_name AS recipient_name, ru.role AS recipient_role
-           FROM admin_messages am
-           JOIN users su ON su.id = am.sender_user_id
-           JOIN users ru ON ru.id = am.recipient_user_id
-           WHERE (am.sender_user_id = ? AND am.recipient_user_id = ?)
-              OR (am.sender_user_id = ? AND am.recipient_user_id = ?)
-           ORDER BY am.created_at, am.id""",
-        (user_id, other_user_id, other_user_id, user_id),
-    ).fetchall()
-
-
 def mark_admin_messages_seen(user_id, other_user_id=None):
+    """The viewer read their incoming admin messages (all of them, or only those from ``other_user_id``)."""
+    sql = ("UPDATE admin_messages SET is_seen = 1, seen_at = datetime('now'), updated_at = datetime('now'), "
+           "delivered_at = COALESCE(delivered_at, datetime('now')) WHERE recipient_user_id = ? AND is_seen = 0")
+    params = [user_id]
+    if other_user_id is not None:
+        sql += " AND sender_user_id = ?"
+        params.append(other_user_id)
     db = get_db()
-    if other_user_id is None:
-        db.execute(
-            "UPDATE admin_messages SET is_seen = 1, seen_at = datetime('now') "
-            "WHERE recipient_user_id = ? AND is_seen = 0",
-            (user_id,),
-        )
-    else:
-        db.execute(
-            "UPDATE admin_messages SET is_seen = 1, seen_at = datetime('now') "
-            "WHERE recipient_user_id = ? AND sender_user_id = ? AND is_seen = 0",
-            (user_id, other_user_id),
-        )
+    db.execute(sql, params)
     db.commit()
+
+
+def mark_admin_messages_delivered(user_id):
+    """The viewer's client fetched its admin-message conversations: incoming messages are 'delivered'."""
+    db = get_db()
+    db.execute(
+        """UPDATE admin_messages SET delivered_at = datetime('now'), updated_at = datetime('now')
+           WHERE recipient_user_id = ? AND delivered_at IS NULL AND is_seen = 0""",
+        (user_id,),
+    )
+    db.commit()
+
+
+def list_admin_conversations(viewer_user_id, only_user_id=None):
+    """One row per active faculty member (their admin conversation as seen by ``viewer_user_id``): unread
+    count + last visible message. Conversations with messages first, newest first."""
+    return get_db().execute(
+        f"""SELECT u.id AS other_user_id, u.full_name, u.profile_picture_path, f.id AS faculty_id, f.faculty_code,
+                   f.department,
+                   (SELECT COUNT(*) FROM admin_messages m WHERE m.recipient_user_id = :v AND m.is_seen = 0
+                      AND m.is_unsent = 0 AND m.hidden_by_recipient = 0
+                      AND (m.sender_user_id = u.id OR m.recipient_user_id = u.id)) AS unread_count,
+                   lm.id AS last_id, lm.message_text AS last_message_text, lm.is_unsent AS last_is_unsent,
+                   lm.is_seen AS last_is_seen, lm.delivered_at AS last_delivered_at,
+                   lm.created_at AS last_message_at, lm.sender_user_id AS last_sender_user_id
+            FROM faculty f JOIN users u ON u.id = f.user_id AND u.is_active = 1
+            LEFT JOIN admin_messages lm ON lm.id = (
+                SELECT m2.id FROM admin_messages m2
+                WHERE (m2.sender_user_id = u.id OR m2.recipient_user_id = u.id) AND {visible_sql("m2")}
+                ORDER BY m2.created_at DESC, m2.id DESC LIMIT 1)
+            WHERE (:only IS NULL OR u.id = :only)
+            ORDER BY (lm.id IS NULL), lm.created_at DESC, u.full_name""",
+        {"v": viewer_user_id, "only": only_user_id},
+    ).fetchall()
 
 
 def list_pending_supporting_requests_for_student(student_id):
@@ -410,6 +414,23 @@ def get_user_by_identifier(identifier):
 
 
 # ---------- chats & messages ----------
+# ``messages`` (student <-> faculty) and ``admin_messages`` (faculty <-> admin) share the same WhatsApp-style
+# columns, so the generic helpers below take the table name (whitelisted).
+
+_MESSAGE_TABLES = ("messages", "admin_messages")
+
+
+def _table(table):
+    if table not in _MESSAGE_TABLES:
+        raise ValueError(f"not a message table: {table}")
+    return table
+
+
+def visible_sql(alias="m"):
+    """SQL condition (named parameter ``:v`` = viewer user id): the row is not 'deleted for me' by the viewer."""
+    return (f"NOT (({alias}.sender_user_id = :v AND {alias}.hidden_by_sender = 1) "
+            f"OR ({alias}.sender_user_id != :v AND {alias}.hidden_by_recipient = 1))")
+
 
 def get_or_create_chat(student_id, faculty_id):
     db = get_db()
@@ -429,54 +450,44 @@ def get_chat_by_id(chat_id):
     return get_db().execute("SELECT * FROM chats WHERE id = ?", (chat_id,)).fetchone()
 
 
-def list_chats_for_student(student_id):
-    return get_db().execute(
-        """SELECT c.id AS chat_id, f.id AS faculty_id, f.faculty_code, u.full_name, u.profile_picture_path,
-                  (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.is_seen = 0
-                     AND m.sender_user_id != (SELECT user_id FROM students WHERE id = c.student_id)) AS unread_count,
-                  (SELECT message_text FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
-                  (SELECT created_at FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at
-           FROM chats c
-           JOIN faculty f ON f.id = c.faculty_id
-           JOIN users u ON u.id = f.user_id
-           WHERE c.student_id = ?
-           ORDER BY last_message_at IS NULL, last_message_at DESC""",
-        (student_id,),
-    ).fetchall()
-
-
-def list_chats_for_faculty(faculty_id):
-    return get_db().execute(
-        """SELECT c.id AS chat_id, s.id AS student_id, s.usn, u.full_name, u.profile_picture_path,
-                  (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.is_seen = 0
-                     AND m.sender_user_id != (SELECT user_id FROM faculty WHERE id = c.faculty_id)) AS unread_count,
-                  (SELECT message_text FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
-                  (SELECT created_at FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at
-           FROM chats c
-           JOIN students s ON s.id = c.student_id
-           JOIN users u ON u.id = s.user_id
-           WHERE c.faculty_id = ?
-           ORDER BY last_message_at IS NULL, last_message_at DESC""",
-        (faculty_id,),
-    ).fetchall()
-
-
 def create_message(chat_id, sender_user_id, message_text=None, attachment_path=None,
-                    attachment_type=None, attachment_original_name=None):
+                    attachment_type=None, attachment_original_name=None, reply_to_id=None):
     db = get_db()
     cur = db.execute(
         """INSERT INTO messages (chat_id, sender_user_id, message_text, attachment_path,
-               attachment_type, attachment_original_name)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (chat_id, sender_user_id, message_text, attachment_path, attachment_type, attachment_original_name),
+               attachment_type, attachment_original_name, reply_to_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (chat_id, sender_user_id, message_text, attachment_path, attachment_type, attachment_original_name,
+         reply_to_id),
     )
     db.execute("UPDATE chats SET updated_at = datetime('now') WHERE id = ?", (chat_id,))
     db.commit()
     return cur.lastrowid
 
 
-def get_message_by_id(message_id):
-    return get_db().execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
+def get_message_by_id(message_id, table="messages"):
+    return get_db().execute(f"SELECT * FROM {_table(table)} WHERE id = ?", (message_id,)).fetchone()
+
+
+def get_messages_by_ids(table, ids):
+    """{id: row} (used to embed the quoted message of replies)."""
+    ids = [i for i in set(ids) if i]
+    if not ids:
+        return {}
+    rows = get_db().execute(
+        f"SELECT * FROM {_table(table)} WHERE id IN ({','.join('?' for _ in ids)})", ids
+    ).fetchall()
+    return {r["id"]: r for r in rows}
+
+
+def list_thread_messages(table, scope_sql, params, viewer_user_id, after_id=0, since=None):
+    """Messages of one conversation the viewer may see (oldest first): new ones (id > after_id) plus, when
+    ``since`` ('YYYY-MM-DD HH:MM:SS' UTC) is given, older ones that changed at/after it (status, edit, unsend)."""
+    return get_db().execute(
+        f"""SELECT * FROM {_table(table)} m WHERE ({scope_sql}) AND (m.id > :after OR m.updated_at >= :since)
+              AND {visible_sql("m")} ORDER BY m.created_at ASC, m.id ASC""",
+        {**params, "v": viewer_user_id, "after": after_id or 0, "since": since},
+    ).fetchall()
 
 
 def list_messages_for_chat(chat_id):
@@ -488,20 +499,67 @@ def list_messages_for_chat(chat_id):
 def mark_messages_seen(chat_id, viewer_user_id):
     db = get_db()
     db.execute(
-        """UPDATE messages SET is_seen = 1, seen_at = datetime('now')
+        """UPDATE messages SET is_seen = 1, seen_at = datetime('now'), updated_at = datetime('now'),
+                  delivered_at = COALESCE(delivered_at, datetime('now'))
            WHERE chat_id = ? AND sender_user_id != ? AND is_seen = 0""",
         (chat_id, viewer_user_id),
     )
     db.commit()
 
 
-def edit_message(message_id, new_text):
+def mark_messages_delivered(chat_ids, viewer_user_id):
+    """The viewer's client fetched these chats (list or thread): their incoming messages are 'delivered'."""
+    chat_ids = list(chat_ids)
+    if not chat_ids:
+        return
     db = get_db()
     db.execute(
-        "UPDATE messages SET message_text = ?, is_edited = 1, updated_at = datetime('now') WHERE id = ?",
+        f"""UPDATE messages SET delivered_at = datetime('now'), updated_at = datetime('now')
+            WHERE chat_id IN ({','.join('?' for _ in chat_ids)}) AND sender_user_id != ?
+              AND delivered_at IS NULL AND is_seen = 0""",
+        [*chat_ids, viewer_user_id],
+    )
+    db.commit()
+
+
+def edit_message(message_id, new_text, table="messages"):
+    db = get_db()
+    db.execute(
+        f"UPDATE {_table(table)} SET message_text = ?, is_edited = 1, updated_at = datetime('now') WHERE id = ?",
         (new_text, message_id),
     )
     db.commit()
+
+
+def unsend_message(message_id, table="messages"):
+    """Turn a message into a tombstone: the text, the attachment reference and the quote are wiped."""
+    wipe = (", attachment_path = NULL, attachment_type = NULL, attachment_original_name = NULL"
+            if table == "messages" else "")
+    db = get_db()
+    db.execute(
+        f"""UPDATE {_table(table)} SET is_unsent = 1, unsent_at = datetime('now'), updated_at = datetime('now'),
+                   message_text = NULL, reply_to_id = NULL{wipe} WHERE id = ? AND is_unsent = 0""",
+        (message_id,),
+    )
+    db.commit()
+
+
+def hide_message(message_id, for_sender, table="messages"):
+    """'Delete for me': hide the message for one participant only."""
+    column = "hidden_by_sender" if for_sender else "hidden_by_recipient"
+    db = get_db()
+    db.execute(f"UPDATE {_table(table)} SET {column} = 1 WHERE id = ?", (message_id,))
+    db.commit()
+
+
+def get_user_names(user_ids):
+    ids = [i for i in set(user_ids) if i]
+    if not ids:
+        return {}
+    rows = get_db().execute(
+        f"SELECT id, full_name FROM users WHERE id IN ({','.join('?' for _ in ids)})", ids
+    ).fetchall()
+    return {r["id"]: r["full_name"] for r in rows}
 
 
 # SQL twin of is_faculty_accessible_to_student() for rows of ``chats c`` (an ACTIVE class assignment that
@@ -534,7 +592,8 @@ def get_total_unread_for_user(user_id, role):
     row = db.execute(
         f"""SELECT COUNT(*) AS c FROM messages m JOIN chats c ON c.id = m.chat_id
             {owner_join}
-            WHERE o.user_id = ? AND m.is_seen = 0 AND m.sender_user_id != ? AND {CHAT_ACCESSIBLE_SQL}""",
+            WHERE o.user_id = ? AND m.is_seen = 0 AND m.sender_user_id != ? AND m.is_unsent = 0
+              AND m.hidden_by_recipient = 0 AND {CHAT_ACCESSIBLE_SQL}""",
         (user_id, user_id),
     ).fetchone()
     return row["c"] if row else 0

@@ -13,7 +13,7 @@ Start with the two cross-cutting documents, then the per-area contract.
 | [academics.md](academics.md) | Admin: tree editor, faculty assignments, class directory |
 | [student.md](student.md) | Student dashboard, faculty search, profile-change requests |
 | [faculty.md](faculty.md) | Faculty dashboard, classes, student search, class requests |
-| [chat.md](chat.md) | Threads, messages, attachments |
+| [chat.md](chat.md) | Threads, messages, attachments, unsend, ticks; faculty-admin messages |
 | [meetings.md](meetings.md) | Meeting requests, responses, availability |
 | [supporting.md](supporting.md) | Supporting-faculty relationships |
 | [notifications.md](notifications.md) | In-app notifications |

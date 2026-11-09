@@ -24,8 +24,8 @@ export default function FacultyClasses() {
         description="Admin decides which classes you teach. Once a class is assigned you can see its students, message them and approve their profile changes."
       />
 
-      <div className="grid items-start gap-x-10 gap-y-9 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
-        <div className="grid min-w-0 gap-9">
+      <div className="grid grid-cols-1 items-start gap-x-10 gap-y-9 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
+        <div className="grid grid-cols-1 min-w-0 gap-9">
           <Panel title="Assigned to you" count={assignments.length || null}>
             {query.isPending ? <ListSkeleton rows={3} /> : null}
             {query.isError ? <QueryError error={query.error} onRetry={() => query.refetch()} title="Could not load your classes" /> : null}
@@ -45,7 +45,7 @@ export default function FacultyClasses() {
                 <RowList label="My class requests">
                   {requests.map((r) => (
                     <Row key={r.id} className="items-start">
-                      <div className="grid min-w-0 flex-1 basis-56 gap-1.5">
+                      <div className="grid grid-cols-1 min-w-0 flex-1 basis-56 gap-1.5">
                         <ClassPath cls={r.class} />
                         {r.note ? <p className="m-0 text-sm text-ink-2">&ldquo;{r.note}&rdquo;</p> : null}
                         <p className="m-0 text-[0.8125rem] text-muted-foreground">

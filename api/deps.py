@@ -91,9 +91,6 @@ def require_role(*roles: str):
         user = get_current_user(request)
         if user["role"] not in allowed:
             raise ApiError(403, "forbidden", "You do not have permission to do that.")
-        if "ADMIN" in allowed and user["role"] == "ADMIN":
-            if user["email"].strip().lower() != get_settings().sole_admin_email.strip().lower():
-                raise ApiError(403, "forbidden", "You do not have permission to do that.")
         return user
 
     dependency.__name__ = "require_role_" + "_".join(r.lower() for r in roles)
@@ -187,6 +184,15 @@ class ApiModel(BaseModel):
     """Base for request bodies: unknown fields are rejected (400 with the field name)."""
 
     model_config = ConfigDict(extra="forbid")
+
+
+class CustomClassIn(ApiModel):
+    """A class typed by the user because theirs is not in the list (created on demand, see ensure_class)."""
+
+    branch: Stripped = Field(min_length=1, max_length=40)
+    department: Stripped = Field(min_length=1, max_length=40)
+    year: Stripped = Field(min_length=1, max_length=20)
+    section: Stripped = Field(min_length=1, max_length=5)
 
 
 class Page(BaseModel):

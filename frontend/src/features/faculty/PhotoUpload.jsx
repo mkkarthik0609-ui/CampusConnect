@@ -40,7 +40,7 @@ export function PhotoUpload({ name, src }) {
   return (
     <div className="flex items-center gap-4">
       <UserAvatar name={name} src={src} size="xl" alt={name ? `${name}, current profile photo` : "Profile photo"} />
-      <div className="grid gap-1.5">
+      <div className="grid grid-cols-1 gap-1.5">
         <input ref={input} type="file" accept="image/png,image/jpeg" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={onPick} />
         <SubmitButton type="button" variant="outline" size="sm" loading={upload.isPending} loadingText="Uploading..." onClick={() => input.current?.click()}>
           <Camera aria-hidden="true" /> {src ? "Change photo" : "Add a photo"}

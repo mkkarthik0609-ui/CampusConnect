@@ -111,16 +111,22 @@ Case-insensitive status; unknown -> `400 validation_error` (`fields.status`). Ne
   "updated_at": "..." }
 ```
 
-### `GET /api/admin/chats/{chat_id}`
+### `GET /api/admin/chats/{chat_id}?after_id=&updated_since=`
 ```json
 { "chat": { "id": 1, "student": {...}, "faculty": {...}, "message_count": 1, "created_at": "...", "updated_at": "..." },
   "messages": [ { "id": 1, "sender_user_id": 4, "sender_role": "STUDENT", "sender_name": "Asha Kumar",
                   "message_text": "hello sir", "attachment_url": null, "attachment_type": null,
-                  "attachment_name": null, "is_seen": false, "seen_at": null, "is_edited": false,
-                  "created_at": "..." } ] }
+                  "attachment_name": null, "status": "seen", "is_seen": true, "seen_at": "...", "delivered_at": "...",
+                  "is_edited": false, "is_unsent": false, "unsent_at": null, "reply_to": null,
+                  "created_at": "...", "updated_at": "..." } ],
+  "last_id": 1, "server_time": "..." }
 ```
 Oldest first. `attachment_url` (e.g. `/uploads/chat/<file>`) is readable by the admin through the uploads route.
-Reading does **not** mark anything as seen. Errors: `404 not_found`, `400 validation_error` (non-integer id).
+**Unsent messages are tombstones** (`is_unsent: true`; text, attachment and quote are null) - the old content is gone from the database,
+and the list's `last_message` reads `<Name> unsent a message`. "Delete for me" is ignored here (the admin sees everything else).
+`reply_to` is `{ id, sender_user_id, sender_name, text_preview, attachment_kind, attachment_name, unsent }`.
+Polling works like the participants' thread (`after_id` + `updated_since` from the previous `last_id` / `server_time`).
+Reading does **not** mark anything as seen. Errors: `404 not_found`, `400 validation_error` (non-integer id, bad `updated_since`).
 
 ## Permission (profile change) requests
 
@@ -152,20 +158,35 @@ Errors: `404 not_found`, `409 conflict` (`"This request has already been reviewe
 `{"items": [...], "total": n}`, oldest first:
 ```json
 { "id": 1, "full_name": "Admin One", "email": "admin@college.edu", "profile_picture_url": null,
-  "is_active": true, "is_you": true, "created_at": "...", "last_login_at": "..." }
+  "is_active": true, "is_you": true, "is_primary": true, "passkey_count": 0, "created_at": "...", "last_login_at": "..." }
 ```
+Every admin may read this list. **Only the primary admin** (`PRIMARY_ADMIN_EMAIL`) may create, deactivate or
+reset admins or revoke their passkeys; any other admin gets 403 `forbidden`. The primary admin is itself protected:
+it cannot be deactivated, have its password reset or its passkeys revoked (400 `validation_error`).
 
 ### `POST /api/admin/admins`  (201)
-Body (all required, unknown keys rejected):
-```json
-{ "full_name": "Second Admin", "email": "second@college.edu", "password": "Sup3rSecret!", "confirm_password": "Sup3rSecret!" }
-```
-The e-mail is lower-cased. Password policy: 8-128 chars with an upper-case letter, a lower-case letter and a digit,
-and not equal to the e-mail (or its local part).
-201 `{"ok": true, "message": "Admin account created.", "admin": { ...admin item... }}`.
-Errors (400 `validation_error` with `fields`): `full_name`, `email` (invalid), `password` (policy),
-`confirm_password` ("Passwords do not match."); `409 conflict` with `fields.email` when the e-mail is already used
-by any account (case-insensitive).
+Body (both required, unknown keys such as `password` rejected): `{ "full_name": "Second Admin", "email": "second@college.edu" }`.
+The e-mail is lower-cased. The server generates a strong temporary password.
+201 `{"ok": true, "message": "...", "admin": { ...admin item... }, "temporary_password": "..."}` - the password is
+returned **once** and never stored in clear text; the new admin signs in with it on the admin login page.
+Errors: 400 `validation_error` (`fields.full_name` / `fields.email`); `409 conflict` with `fields.email` when the
+e-mail is already used by any account (case-insensitive).
+
+### Managing admins
+| Endpoint | Effect |
+|---|---|
+| `POST /api/admin/admins/{id}/active` `{"active": bool}` | deactivate / reactivate -> `{ok, message, admin}`. You cannot deactivate yourself or the primary admin. A deactivated admin's sessions end and sign-in is refused. |
+| `POST /api/admin/admins/{id}/reset-password` | new temporary password -> `{ok, message, temporary_password}` (shown once; lifts a sign-in lockout) |
+| `DELETE /api/admin/admins/{id}/passkeys` | revoke all of that admin's passkeys -> `{ok, message, removed}` |
+
+### Passkeys (WebAuthn) - the signed-in admin's own
+`GET /api/admin/passkeys` -> `{items: [{id, label, transports, created_at, last_used_at}], total}`.
+`POST /api/admin/passkeys/options` -> `{options}` (discoverable credential creation options; the browser `Origin`
+must be listed in `WEBAUTHN_ALLOWED_ORIGINS`, else 400). `POST /api/admin/passkeys/verify` `{credential, label?}` -> 201
+`{ok, id}`. `DELETE /api/admin/passkeys/{id}` removes one of your own (404 otherwise). At most 10 per admin.
+Sign-in: `POST /api/auth/admin-passkey/options` (no body) -> `{options}`; `POST /api/auth/admin-passkey/verify`
+`{credential, identifier?}` -> same response as `POST /api/auth/admin-login`. The challenge lives in the signed
+session (5 minutes, single use); failures are throttled like password sign-ins.
 
 ## Error codes used by `/api/admin`
 

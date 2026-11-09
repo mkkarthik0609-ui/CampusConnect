@@ -32,7 +32,7 @@ const Toaster = ({
       }}
       toastOptions={{
         classNames: {
-          toast: "!rounded-lg !border !font-sans !text-[0.9375rem] !font-medium !shadow-[var(--shadow-2)]",
+          toast: "!rounded-[10px] !border !font-sans !text-[0.9375rem] !font-medium !shadow-[var(--shadow-2)]",
           success: "!bg-ok !text-ok-ink !border-ok-line",
           error: "!bg-danger !text-danger-ink !border-danger-line",
           warning: "!bg-warn !text-warn-ink !border-warn-line",
@@ -44,7 +44,7 @@ const Toaster = ({
           "--normal-bg": "var(--surface)",
           "--normal-text": "var(--ink)",
           "--normal-border": "var(--line)",
-          "--border-radius": "12px"
+          "--border-radius": "10px"
         }
       }
       {...props}

@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/app/EmptyState";
 import { UserAvatar } from "@/components/app/UserAvatar";
 import { ClassPath } from "@/components/app/ClassPath";
 import { Notice } from "@/components/app/Notice";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CardListSkeleton } from "@/components/app/skeletons";
 import { pluralize } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -43,17 +43,7 @@ export function Row({ children, className }) {
 }
 
 export function ListSkeleton({ rows = 3 }) {
-  return (
-    <div role="status" aria-busy="true" className="divide-y divide-line overflow-hidden rounded-lg border bg-card shadow-sm">
-      <span className="sr-only">Loading</span>
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="flex items-center gap-3 px-4 py-4">
-          <Skeleton className="size-9 rounded-full" />
-          <div className="grid flex-1 gap-2"><Skeleton className="h-4 w-1/3" /><Skeleton className="h-3 w-1/2" /></div>
-        </div>
-      ))}
-    </div>
-  );
+  return <CardListSkeleton rows={rows} />;
 }
 
 export function QueryError({ error, onRetry, title = "Could not load this" }) {
@@ -71,7 +61,7 @@ export function PersonCell({ name, src, code, extra, size = "sm", className }) {
     <div className={cn("flex min-w-0 items-center gap-3", className)}>
       <UserAvatar name={name} src={src} size={size} />
       <div className="min-w-0">
-        <p className="m-0 truncate font-semibold text-foreground">{name}</p>
+        <p className="m-0 break-words font-semibold text-foreground">{name}</p>
         <p className="m-0 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
           {code ? <span className="font-mono text-[0.8125rem]">{code}</span> : null}
           {extra}
@@ -132,7 +122,7 @@ export function ChangedFields({ changes, className }) {
   const entries = Object.entries(changes || {});
   if (!entries.length) return null;
   return (
-    <dl className={cn("m-0 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[max-content_1fr]", className)}>
+    <dl className={cn("m-0 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-[max-content_1fr]", className)}>
       {entries.map(([key, value]) => (
         <div key={key} className="contents">
           <dt className="font-semibold text-muted-foreground">{FIELD_LABELS[key] || key.replace(/_/g, " ")}</dt>

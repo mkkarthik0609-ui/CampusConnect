@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useMeta, SITE_NAME } from "@/hooks/useMeta";
 
-export const APP_NAME = "Campus Connect";
+export const APP_NAME = SITE_NAME;
 
-/** Sets document.title to "<title> · Campus Connect". <PageHeader title="..."/> calls this for you. */
+/**
+ * Sets the document title ("<title> | CampusConnect") plus the matching head tags via useMeta.
+ * <PageHeader title="..."/> calls this for you; an empty title on "/" gives the landing-page head.
+ */
 export function usePageTitle(title) {
-  useEffect(() => {
-    document.title = title ? `${title} · ${APP_NAME}` : APP_NAME;
-  }, [title]);
+  useMeta({ title });
 }

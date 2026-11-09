@@ -13,8 +13,7 @@ from tests.conftest import (
 
 ADMIN_GETS = ["/api/admin/dashboard", "/api/admin/students", "/api/admin/faculty", "/api/admin/meetings",
               "/api/admin/chats", "/api/admin/chats/1", "/api/admin/permission-requests", "/api/admin/admins"]
-NEW_ADMIN = {"full_name": "Second Admin", "email": "Second.Admin@College.edu", "password": "Sup3rSecret!",
-             "confirm_password": "Sup3rSecret!"}
+NEW_ADMIN = {"full_name": "Second Admin", "email": "Second.Admin@College.edu"}
 
 
 def err(resp, status, code=None):
@@ -241,11 +240,15 @@ def test_admins_list_and_create(app, world, admin):
     assert me["email"] == ADMIN_EMAIL and me["is_you"] is True and me["is_active"] is True
     assert "password_hash" not in me and {"id", "full_name", "created_at", "last_login_at",
                                           "profile_picture_url"} <= set(me)
+    assert me["is_primary"] is True and me["passkey_count"] == 0
 
     resp = api_post(admin, "/api/admin/admins", json=NEW_ADMIN)
-    body = err(resp, 409, "conflict")
-    assert "email" in body["fields"]
-    assert admin.get("/api/admin/admins").json()["total"] == 1
+    assert resp.status_code == 201, resp.text
+    created = resp.json()
+    assert created["admin"]["email"] == "second.admin@college.edu" and created["admin"]["is_primary"] is False
+    assert len(created["temporary_password"]) >= 12
+    data = admin.get("/api/admin/admins").json()
+    assert data["total"] == 2 and "temporary_password" not in str(data)
 
 
 def test_create_admin_email_must_be_unique_case_insensitively(app, world, admin):
@@ -257,33 +260,20 @@ def test_create_admin_email_must_be_unique_case_insensitively(app, world, admin)
 
 
 @pytest.mark.parametrize("patch,field", [
-    ({"password": "short1A", "confirm_password": "short1A"}, "password"),
-    ({"password": "alllowercase1", "confirm_password": "alllowercase1"}, "password"),
-    ({"password": "NoDigitsHere", "confirm_password": "NoDigitsHere"}, "password"),
-    ({"password": "NOLOWER123", "confirm_password": "NOLOWER123"}, "password"),
-    ({"confirm_password": "Different1!"}, "confirm_password"),
     ({"email": "not-an-email"}, "email"),
     ({"email": ""}, "email"),
     ({"full_name": "   "}, "full_name"),
-    ({"password": "Aa1" + "x" * 126, "confirm_password": "Aa1" + "x" * 126}, "password"),
 ])
 def test_create_admin_validation(app, world, admin, patch, field):
     before = db_count(app, "users")
-    body = err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, "email": ADMIN_EMAIL, **patch}),
-               400, "validation_error")
+    body = err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, **patch}), 400, "validation_error")
     assert field in body["fields"]
     assert db_count(app, "users") == before
 
 
 def test_create_admin_rejects_unknown_and_missing_fields(app, world, admin):
     err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, "role": "STUDENT"}), 400, "validation_error")
+    err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, "password": "Sup3rSecret!"}), 400, "validation_error")
     err(api_post(admin, "/api/admin/admins", json={"email": "a@b.co"}), 400, "validation_error")
     err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, "email": 5}), 400, "validation_error")
     assert db_count(app, "users", "role = 'ADMIN'") == 1
-
-
-def test_admin_password_may_not_equal_the_email_local_part(app, world, admin):
-    body = err(api_post(admin, "/api/admin/admins", json={
-        **NEW_ADMIN, "email": "other@example.com", "password": "Passw0rd1", "confirm_password": "Passw0rd1"}),
-        409, "conflict")
-    assert "email" in body["fields"]

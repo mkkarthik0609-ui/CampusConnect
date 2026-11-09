@@ -77,7 +77,7 @@ export default function AdminAssignments() {
 
       <section ref={formRef} aria-label="Assign a faculty member to a class" className="mb-8 rounded-lg border bg-card p-5 shadow-sm">
         <SectionHeading title="Assign a class" />
-        <form onSubmit={submit} noValidate className="grid gap-4">
+        <form onSubmit={submit} noValidate className="grid grid-cols-1 gap-4">
           <FormField label="Faculty member" error={errors.faculty_id} required>
             {({ id, describedBy, invalid }) => (
               <Select value={facultyId} onValueChange={(v) => { setFacultyId(v); setErrors((p) => ({ ...p, faculty_id: "" })); }}>
@@ -111,7 +111,7 @@ export default function AdminAssignments() {
         </div>
       ) : null}
 
-      <ul className="m-0 grid list-none gap-3 p-0">
+      <ul className="m-0 grid grid-cols-1 list-none gap-3 p-0">
         {shown.map((f) => (
           <li key={f.faculty_id} className="rounded-lg border bg-card p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">

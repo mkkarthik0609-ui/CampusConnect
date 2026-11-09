@@ -3,22 +3,44 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CampusConnect | Mentor chat, meetings and classes for your college</title>
+    <meta name="description" content="CampusConnect connects students, faculty and administrators: mentor chat, meeting requests with timing set by faculty, and admin-defined classes for your college." />
+    <meta name="robots" content="index,follow" />
+    <!-- The canonical link, per-route title/description/robots and JSON-LD are set at runtime by src/hooks/useMeta.js. -->
+
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#111741" />
-    <meta name="description" content="Campus Connect: Mentor-Connect chat, meeting requests with timing set by faculty, and admin-defined classes for your college." />
-    <link rel="icon" type="image/svg+xml" href="/src/assets/favicon.svg" />
-    <title>Campus Connect</title>
+    <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="CampusConnect" />
+    <meta property="og:title" content="CampusConnect | Mentor chat, meetings and classes for your college" />
+    <meta property="og:description" content="CampusConnect connects students, faculty and administrators: mentor chat, meeting requests with timing set by faculty, and admin-defined classes for your college." />
+    <meta property="og:url" content="https://campus-connect-network.vercel.app/" />
+    <meta property="og:image" content="https://campus-connect-network.vercel.app/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="CampusConnect logo and tagline on a near-black background" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="CampusConnect | Mentor chat, meetings and classes for your college" />
+    <meta name="twitter:description" content="CampusConnect connects students, faculty and administrators: mentor chat, meeting requests with timing set by faculty, and admin-defined classes for your college." />
+    <meta name="twitter:image" content="https://campus-connect-network.vercel.app/og-image.png" />
+
     <!-- The API serves a strict CSP (script-src 'self'), so no inline scripts: the pre-paint theme script is a module. -->
     <script type="module" src="/src/lib/preTheme.js"></script>
     <style>
-      /* Until the app CSS loads, match the system theme so there is no white flash. */
-      html { background: #f2f4fa; }
-      @media (prefers-color-scheme: dark) { html { background: #0b0e1c; } }
+      /* Until the app CSS loads, match the system theme so there is no flash. */
+      html { background: #f7f7f5; }
+      @media (prefers-color-scheme: dark) { html { background: #0a0a0b; } }
     </style>
   </head>
   <body>
     <div id="root"></div>
-    <noscript>Campus Connect needs JavaScript to run. Please enable it and reload.</noscript>
+    <noscript>CampusConnect needs JavaScript to run. Please enable it and reload.</noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

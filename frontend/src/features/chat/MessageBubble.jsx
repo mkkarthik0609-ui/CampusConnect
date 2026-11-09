@@ -1,124 +1,175 @@
-import { useState } from "react";
-import { Check, CheckCheck, Clock, FileText, Pencil } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { SubmitButton } from "@/components/app/SubmitButton";
+import { memo, useRef, useState } from "react";
+import { Ban, Check, CheckCheck, ChevronDown, Clock, Copy, CornerUpLeft, FileText, Pencil, Trash2, Undo2 } from "lucide-react";
+import { toast } from "sonner";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { uploadUrl } from "@/lib/api";
-import { formatTime } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { clock } from "./time";
 
-/** One chat message. `pending` = optimistic message still being sent. */
-export function MessageBubble({ message, otherName, pending = false, editing, onEdit, onCancelEdit, onSaveEdit, saving }) {
-  const mine = message.is_mine;
-  const att = message.attachment;
+const SWIPE_TRIGGER = 56;
+const LONG_PRESS_MS = 480;
+
+/** Delivery ticks: clock (sending), one grey tick (sent), two grey (delivered), two blue (seen). */
+export function Tick({ status }) {
+  const label = { pending: "Sending", sent: "Sent", delivered: "Delivered", seen: "Seen" }[status] || "Sent";
+  const Icon = status === "pending" ? Clock : status === "sent" ? Check : CheckCheck;
   return (
-    <li className={cn("flex", mine ? "justify-end" : "justify-start")}>
-      <div
-        className={cn(
-          "min-w-0 max-w-[min(34rem,86%)] rounded-2xl px-3.5 py-2.5 text-[0.9688rem] leading-snug shadow-xs",
-          mine
-            ? "rounded-br-md bg-primary text-primary-foreground"
-            : "rounded-bl-md border border-line bg-card text-foreground",
-          pending && "opacity-70",
-        )}
-      >
-        <span className="sr-only">{mine ? "You" : otherName}: </span>
-        {att ? <Attachment att={att} mine={mine} /> : null}
-        {editing ? (
-          <EditForm initial={message.message_text || ""} onCancel={onCancelEdit} onSave={onSaveEdit} saving={saving} />
-        ) : message.message_text ? (
-          <p className={cn("m-0 break-words whitespace-pre-wrap", att && "mt-2")}>{message.message_text}</p>
-        ) : null}
-        {!editing ? (
-          <p className={cn("m-0 mt-1 flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-xs tabular-nums", mine ? "text-primary-foreground/80" : "text-muted-foreground")}>
-            {message.is_edited ? <span>Edited</span> : null}
-            {mine && message.can_edit && !pending ? (
-              <button
-                type="button"
-                onClick={onEdit}
-                className="inline-flex min-h-6 items-center gap-1 rounded-sm font-semibold underline underline-offset-2 outline-none hover:text-primary-foreground focus-visible:ring-2 focus-visible:ring-primary-foreground pointer-coarse:min-h-9"
-              >
-                <Pencil aria-hidden="true" className="size-3" /> Edit
-              </button>
-            ) : null}
-            <time dateTime={message.created_at}>{pending ? "Sending" : formatTime(message.created_at)}</time>
-            {mine ? (
-              <span className="inline-flex items-center gap-1 font-semibold">
-                {pending ? (
-                  <Clock aria-hidden="true" className="size-3.5" />
-                ) : message.is_seen ? (
-                  <CheckCheck aria-hidden="true" className="size-3.5" />
-                ) : (
-                  <Check aria-hidden="true" className="size-3.5" />
-                )}
-                <span>{pending ? "" : message.is_seen ? "Seen" : "Sent"}</span>
-              </span>
-            ) : null}
-          </p>
-        ) : null}
-      </div>
-    </li>
+    <span className="wa-tick" data-status={status}>
+      <Icon aria-hidden="true" />
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }
 
-function Attachment({ att, mine }) {
+function Quote({ quote, otherName, neutral, onJump }) {
+  const who = quote.is_mine && !neutral ? "You" : quote.sender_name || otherName;
+  let text = quote.text_preview;
+  if (quote.unsent) text = "This message was unsent";
+  else if (!text && quote.attachment_kind) text = quote.attachment_kind === "image" ? "Photo" : quote.attachment_name || "File";
+  return (
+    <button type="button" className="wa-quote" onClick={() => onJump(quote.id)} aria-label={`Go to the message from ${who}: ${text}`}>
+      <span className="wa-quote-name">{who}</span>
+      <span className="wa-quote-text" data-unsent={quote.unsent || undefined}>{text}</span>
+    </button>
+  );
+}
+
+function Attachment({ att }) {
+  if (!att.url) {
+    return (
+      <span className="wa-file"><FileText aria-hidden="true" /><span><b>{att.name}</b><small>Sending...</small></span></span>
+    );
+  }
   const href = uploadUrl(att.url);
   if (att.is_image) {
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-lg">
-        <img src={href} alt={`Attached image: ${att.name}`} loading="lazy" className="max-h-60 w-auto max-w-full rounded-lg bg-sunken object-cover" />
+      <a className="wa-media" href={href} target="_blank" rel="noopener noreferrer">
+        <img src={href} alt={`Attached image: ${att.name}`} loading="lazy" />
       </a>
     );
   }
   return (
-    <a
-      href={href}
-      download={att.name}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={cn(
-        "flex min-w-0 items-center gap-2.5 rounded-lg px-3 py-2 no-underline outline-none focus-visible:ring-2",
-        mine
-          ? "bg-white/15 text-primary-foreground hover:bg-white/25 focus-visible:ring-primary-foreground"
-          : "bg-sunken text-foreground hover:bg-line focus-visible:ring-ring",
-      )}
-    >
-      <FileText aria-hidden="true" className="size-5 shrink-0" />
-      <span className="min-w-0">
-        <span className="block truncate font-semibold">{att.name}</span>
-        <span className="block text-xs uppercase opacity-80">{att.type} file - download</span>
-      </span>
+    <a className="wa-file" href={href} download={att.name} target="_blank" rel="noopener noreferrer">
+      <FileText aria-hidden="true" />
+      <span><b>{att.name}</b><small>{att.type} file - download</small></span>
     </a>
   );
 }
 
-function EditForm({ initial, onSave, onCancel, saving }) {
-  const [value, setValue] = useState(initial);
-  const trimmed = value.trim();
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success("Copied.");
+  } catch {
+    toast.error("Could not copy that message.");
+  }
+}
+
+/**
+ * One message bubble (WhatsApp Web). Desktop: hover chevron / right-click opens the menu. Touch: long-press opens it,
+ * swipe right replies. `pending` = optimistic message that is still being sent.
+ */
+export const MessageBubble = memo(function MessageBubble({ m, first, showName, flash, otherName, readOnly, pending, onReply, onEdit, onUnsend, onHide, onJump }) {
+  const [open, setOpen] = useState(false);
+  const [drag, setDrag] = useState(0);
+  const touch = useRef(null);
+  const timer = useRef(null);
+
+  const mine = m.is_mine;
+  // the admin viewer is a third party: name both sides instead of "You"
+  const you = mine && !showName;
+  const sender = you ? "You" : m.sender_name || otherName;
+  const canAct = !readOnly && !pending;
+  const canReply = canAct && !m.is_unsent;
+
+  const stop = () => { clearTimeout(timer.current); timer.current = null; };
+  function onTouchStart(e) {
+    if (!canAct) return;
+    const t = e.touches[0];
+    touch.current = { x: t.clientX, y: t.clientY, moved: false };
+    timer.current = setTimeout(() => { if (touch.current && !touch.current.moved) { navigator.vibrate?.(15); setOpen(true); } }, LONG_PRESS_MS);
+  }
+  function onTouchMove(e) {
+    const s = touch.current;
+    if (!s) return;
+    const dx = e.touches[0].clientX - s.x;
+    const dy = e.touches[0].clientY - s.y;
+    if (Math.abs(dy) > 10 || dx < -10) { s.moved = true; stop(); setDrag(0); return; }
+    if (dx > 8 && canReply) { s.moved = true; stop(); setDrag(Math.min(dx, 80)); }
+  }
+  function onTouchEnd() {
+    stop();
+    if (drag >= SWIPE_TRIGGER) { navigator.vibrate?.(10); onReply(m); }
+    touch.current = null;
+    setDrag(0);
+  }
+
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (trimmed && trimmed !== initial.trim()) onSave(trimmed);
-        else if (!saving) onCancel();
-      }}
-      className="grid min-w-[min(18rem,70vw)] gap-2"
+    <li
+      id={`wa-msg-${m.id}`}
+      className="wa-row"
+      data-mid={m.id}
+      data-mine={mine}
+      data-first={first}
+      data-flash={flash || undefined}
+      data-drag={drag > 0}
     >
-      <label className="sr-only" htmlFor="edit-message">Edit your message</label>
-      <Textarea
-        id="edit-message"
-        autoFocus
-        onFocus={(e) => e.target.setSelectionRange(e.target.value.length, e.target.value.length)}
-        value={value}
-        maxLength={4000}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
-        className="min-h-16 border-transparent text-foreground"
-      />
-      <div className="flex justify-end gap-2">
-        <Button type="button" size="sm" variant="secondary" onClick={onCancel} disabled={saving}>Cancel</Button>
-        <SubmitButton size="sm" variant="saffron" loading={saving} disabled={!trimmed}>Save</SubmitButton>
+      <div
+        className="wa-bubble wa-bubble-in"
+        data-mine={mine}
+        data-tail={first}
+        style={drag ? { transform: `translateX(${drag}px)` } : undefined}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+        onContextMenu={(e) => { if (canAct) { e.preventDefault(); setOpen(true); } }}
+      >
+        <span className="sr-only">{sender}: </span>
+        {showName && first ? <span className="wa-sender" aria-hidden="true">{sender}</span> : null}
+
+        {m.is_unsent ? (
+          <p className="wa-tombstone">
+            <Ban aria-hidden="true" />
+            {you ? "You unsent a message" : `${sender} unsent a message`}
+            <Meta m={m} pending={pending} bare />
+          </p>
+        ) : (
+          <>
+            {m.reply_to ? <Quote quote={m.reply_to} otherName={otherName} neutral={showName} onJump={onJump} /> : null}
+            {m.attachment ? <Attachment att={m.attachment} /> : null}
+            <p className="wa-text">
+              {m.message_text}
+              <Meta m={m} pending={pending} />
+            </p>
+          </>
+        )}
+
+        {canAct ? (
+          <DropdownMenu open={open} onOpenChange={setOpen}>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="wa-chevron" aria-label="Message options"><ChevronDown aria-hidden="true" /></button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align={mine ? "end" : "start"} className="min-w-44">
+              {canReply ? <DropdownMenuItem onSelect={() => onReply(m)}><CornerUpLeft aria-hidden="true" /> Reply</DropdownMenuItem> : null}
+              {m.message_text ? <DropdownMenuItem onSelect={() => copyText(m.message_text)}><Copy aria-hidden="true" /> Copy</DropdownMenuItem> : null}
+              {m.can_edit ? <DropdownMenuItem onSelect={() => onEdit(m)}><Pencil aria-hidden="true" /> Edit</DropdownMenuItem> : null}
+              {(canReply || m.message_text || m.can_edit) ? <DropdownMenuSeparator /> : null}
+              {m.can_unsend ? <DropdownMenuItem className="wa-menu-danger" onSelect={() => onUnsend(m)}><Undo2 aria-hidden="true" /> Unsend</DropdownMenuItem> : null}
+              <DropdownMenuItem className="wa-menu-danger" onSelect={() => onHide(m)}><Trash2 aria-hidden="true" /> Delete for me</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
-    </form>
+    </li>
+  );
+});
+
+function Meta({ m, pending, bare }) {
+  return (
+    <span className="wa-meta" style={bare ? { marginLeft: "0.6rem" } : undefined}>
+      {m.is_edited && !bare ? <span>Edited</span> : null}
+      {pending ? null : <time dateTime={m.created_at}>{clock(m.created_at)}</time>}
+      {m.is_mine ? <Tick status={pending ? "pending" : m.status} /> : null}
+    </span>
   );
 }

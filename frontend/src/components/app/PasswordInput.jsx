@@ -13,7 +13,7 @@ export function PasswordInput({ className, ...props }) {
         onClick={() => setVisible((v) => !v)}
         aria-label={visible ? "Hide password" : "Show password"}
         aria-pressed={visible}
-        className="absolute top-1/2 right-1 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-primary-soft hover:text-primary-ink pointer-coarse:size-11"
+        className="absolute top-1/2 right-1 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary-soft hover:text-primary-ink pointer-coarse:size-11"
       >
         {visible ? <EyeOff aria-hidden="true" className="size-[1.1rem]" /> : <Eye aria-hidden="true" className="size-[1.1rem]" />}
       </button>

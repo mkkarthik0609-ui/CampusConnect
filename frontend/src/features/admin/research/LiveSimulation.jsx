@@ -73,7 +73,7 @@ export function LiveSimulation({ defaultLoad = "medium" }) {
       </div>
 
       {res ? (
-        <div className="grid gap-8">
+        <div className="grid grid-cols-1 gap-8">
           {res.truncated ? (
             <Notice tone="warning" title="Stopped early to keep the server responsive">
               {res.seeds_run} of {res.seeds_requested} weeks were simulated, so the intervals are wider.

@@ -11,6 +11,24 @@
         ],
         "createdAt": "2026-09-30T18:19:28.695Z",
         "reason": "assistant: .steps li uses border-top as a step-progress rule on a non-rounded element; no border-radius applies (checked lines 622-626)"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "frontend/src/features/chat/chat.css"
+        ],
+        "createdAt": "2026-11-09T10:30:05.548Z",
+        "reason": "assistant decision: WhatsApp reply-quote bar is the platform's defining pattern and the user asked for a full WhatsApp replica; two lines only (.wa-quote, .wa-context)"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/features/chat/chat.css"
+        ],
+        "createdAt": "2026-11-09T17:47:35.492Z",
+        "reason": "assistant decision: WhatsApp reply-quote bar (.wa-quote, .wa-context, lines 207/244) is the platform's defining pattern; user asked for the WhatsApp structure. Same exception as the frontend/-prefixed entry, path form the hook reports from the frontend cwd"
       }
     ]
   }

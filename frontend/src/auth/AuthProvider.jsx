@@ -84,7 +84,11 @@ export function AuthProvider({ children }) {
       await authApi.logout();
     } finally {
       wasAuthed.current = false; // do not toast "signed out" for a deliberate logout
-      qc.clear();
+      // Flip to guest first so the guards redirect to /login at once. Never qc.clear(): it detaches the
+      // session observer from its query, leaving this provider stuck "authenticated" while every
+      // refetch 401s (the "Could not load your dashboard" screen).
+      qc.setQueryData(queryKeys.session, GUEST);
+      qc.removeQueries({ predicate: (q) => q.queryKey[0] !== queryKeys.session[0] });
       forgetStoredTheme();
       // Fresh token for the login screen.
       try { qc.setQueryData(queryKeys.session, await fetchSession()); } catch { qc.setQueryData(queryKeys.session, GUEST); }

@@ -40,6 +40,7 @@ def make_settings(tmp_path, **overrides):
         testing=True,
         csrf_enabled=False,
         enable_scheduler=False,
+        seed_extra_branches=False,  # tests assume the CSE-only default tree
         secret_key=TEST_SECRET,
         database_path=str(tmp_path / "test.db"),
         upload_root=str(tmp_path / "uploads"),

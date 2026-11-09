@@ -15,7 +15,7 @@ export function MeetingCard({ meeting: m, role, onRespond, onCancel, onComplete 
   const hasActions = m.can_respond || m.can_complete || m.can_cancel;
 
   return (
-    <article aria-label={`Meeting with ${m.counterpart_name}: ${m.reason}`} className="grid gap-3 border-t border-line px-[clamp(0.9rem,2.5vw,1.4rem)] py-4 first:border-t-0">
+    <article aria-label={`Meeting with ${m.counterpart_name}: ${m.reason}`} className="grid grid-cols-1 gap-3 border-t border-line px-[clamp(0.9rem,2.5vw,1.4rem)] py-4 first:border-t-0">
       <div className="flex items-start gap-3">
         <UserAvatar name={m.counterpart_name} src={person?.profile_picture_url} size="md" />
         <div className="min-w-0 flex-1">
@@ -29,7 +29,7 @@ export function MeetingCard({ meeting: m, role, onRespond, onCancel, onComplete 
         <StatusPill status={m.status} />
       </div>
 
-      <div className="grid gap-1.5 sm:pl-14">
+      <div className="grid grid-cols-1 gap-1.5 sm:pl-14">
         <p className="m-0 font-semibold">{m.reason}</p>
         {m.student_message ? <p className="m-0 whitespace-pre-wrap text-[0.9688rem] text-ink-2">{m.student_message}</p> : null}
 

@@ -8,7 +8,7 @@ import { Slot } from "radix-ui"
  * For workflow states (PENDING, ACCEPTED, ...) use <StatusPill/> instead.
  */
 const badgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2.5 py-0.5 text-[0.8125rem] leading-snug font-semibold whitespace-nowrap transition-colors [&>svg]:pointer-events-none [&>svg]:size-3.5",
+  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2.5 py-0.5 text-[0.6875rem] leading-snug font-medium tracking-[0.08em] whitespace-nowrap uppercase transition-colors [&>svg]:pointer-events-none [&>svg]:size-3.5",
   {
     variants: {
       variant: {
@@ -17,7 +17,7 @@ const badgeVariants = cva(
         outline: "border-line-strong text-foreground [a&]:hover:bg-primary-soft",
         destructive: "bg-danger text-danger-ink",
         saffron:
-          "h-[1.4rem] min-w-[1.4rem] bg-saffron px-1.5 text-xs font-bold text-on-saffron tabular-nums",
+          "h-[1.4rem] min-w-[1.4rem] bg-saffron px-1.5 text-xs font-semibold tracking-normal text-on-saffron tabular-nums",
         ghost: "[a&]:hover:bg-primary-soft",
       },
     },

@@ -108,7 +108,14 @@ class Settings:
     reminder_interval_minutes: int = 60
     enable_scheduler: bool = True
     bootstrap_admin: bool = False
-    sole_admin_email: str = "mkkarthik0609@gmail.com"
+    # Seed ECE/ISE/Mechanical/... next to the CSE defaults (SEED_EXTRA_BRANCHES=0 turns it off).
+    seed_extra_branches: bool = True
+    # The owner account: always an active admin; nobody can deactivate it (PRIMARY_ADMIN_EMAIL).
+    primary_admin_email: str = "mkkarthik0609@gmail.com"
+    # Browser origins allowed to register/use passkeys (WEBAUTHN_ALLOWED_ORIGINS, comma separated).
+    webauthn_allowed_origins: tuple = (
+        "https://campus-connect-network.vercel.app", "http://localhost:5173", "http://localhost:8000",
+    )
 
     # ------------------------------------------------------------------ derived
     @property
@@ -135,10 +142,8 @@ class Settings:
     def docs_enabled(self) -> bool:
         return bool(self.debug) and not self.is_production
 
-    @property
-    def admin_any_password_enabled(self) -> bool:
-        """Demo convenience only; production must always verify the password."""
-        return not self.is_production and (self.testing or self.environment in ("development", "test"))
+    def is_primary_admin(self, email) -> bool:
+        return (email or "").strip().lower() == self.primary_admin_email.strip().lower()
 
     # ------------------------------------------------------------------ construction
     @classmethod
@@ -171,6 +176,11 @@ class Settings:
             reminder_interval_minutes=_env_int("REMINDER_INTERVAL_MINUTES", 60),
             enable_scheduler=_env_bool("ENABLE_SCHEDULER", True),
             bootstrap_admin=_env_bool("BOOTSTRAP_ADMIN", False),
+            seed_extra_branches=_env_bool("SEED_EXTRA_BRANCHES", True),
+            primary_admin_email=(os.environ.get("PRIMARY_ADMIN_EMAIL") or cls.primary_admin_email).strip().lower(),
+            webauthn_allowed_origins=tuple(
+                o.strip().rstrip("/") for o in (os.environ.get("WEBAUTHN_ALLOWED_ORIGINS") or "").split(",") if o.strip()
+            ) or cls.webauthn_allowed_origins,
         )
         values.update(overrides)
         return cls(**values)

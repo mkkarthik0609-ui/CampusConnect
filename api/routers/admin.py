@@ -14,11 +14,12 @@ from api.deps import ApiModel, CurrentUser, Stripped, items, ok, require_role, s
 from api.errors import ApiError
 from api.settings import get_settings
 from api.schemas import class_object, profile_picture_url
+from api.routers._messages import now_str, parse_since, reply_embed, status_of
 from models import academic_queries as aq
 from models import admin_queries
 from models import queries
+from models import security_queries as sq
 from services import auth_service, file_service, permission_service
-from services.auth_service import ConflictError
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_role("ADMIN"))], tags=["admin"])
 
@@ -125,8 +126,10 @@ class DecisionIn(ApiModel):
 class AdminCreateIn(ApiModel):
     full_name: Stripped = Field(min_length=1, max_length=120)
     email: Stripped = Field(min_length=1, max_length=254)
-    password: str = Field(min_length=1, max_length=1024)
-    confirm_password: str = Field(max_length=1024)
+
+
+class ActiveIn(ApiModel):
+    active: bool
 
 
 # ---------------------------------------------------------------- dashboard
@@ -242,41 +245,63 @@ def list_chats():
     out = []
     for c in admin_queries.list_chats():
         student, faculty = _chat_parties(c, combos)
+        last_message = c["last_message"]
+        if c["last_is_unsent"]:  # a tombstone never shows the old content
+            who = student if c["last_sender_user_id"] == c["student_user_id"] else faculty
+            last_message = f"{who['full_name']} unsent a message"
         out.append({
             "id": c["id"], "student": student, "faculty": faculty, "message_count": c["message_count"],
-            "last_message": c["last_message"], "last_message_at": c["last_message_at"],
+            "last_message": last_message, "last_message_at": c["last_message_at"],
             "created_at": c["created_at"], "updated_at": c["updated_at"],
         })
     return items(out, total=len(out))
 
 
 @router.get("/chats/{chat_id}")
-def chat_detail(chat_id: int):
+def chat_detail(chat_id: int, after_id: int = Query(0, ge=0),
+                updated_since: Optional[str] = Query(None, description="also messages changed at/after this ISO time")):
+    """Read-only view of a conversation (opening it marks nothing as seen). Unsent messages are tombstones.
+    Poll with ``after_id=last_id`` + ``updated_since=server_time`` like the participants do."""
+    since = parse_since(updated_since)
     chat = admin_queries.get_chat(chat_id)
     if chat is None:
         raise ApiError(404, "not_found", "Conversation not found.")
+    server_time = now_str()
     student, faculty = _chat_parties(chat, combos_by_section())
+    rows = admin_queries.list_messages(chat_id, after_id, since)
+    names = {chat["student_user_id"]: student["full_name"], chat["faculty_user_id"]: faculty["full_name"]}
+    replies = queries.get_messages_by_ids("messages", [r["reply_to_id"] for r in rows if r["reply_to_id"]])
     messages = []
-    for m in admin_queries.list_messages(chat_id):
+    for m in rows:
         from_student = m["sender_user_id"] == chat["student_user_id"]
+        unsent = bool(m["is_unsent"])
         messages.append({
             "id": m["id"],
             "sender_user_id": m["sender_user_id"],
             "sender_role": "STUDENT" if from_student else "FACULTY",
             "sender_name": student["full_name"] if from_student else faculty["full_name"],
-            "message_text": m["message_text"],
-            "attachment_url": file_service.upload_url(m["attachment_path"]),
-            "attachment_type": m["attachment_type"],
-            "attachment_name": m["attachment_original_name"],
+            "message_text": None if unsent else m["message_text"],
+            "attachment_url": None if unsent else file_service.upload_url(m["attachment_path"]),
+            "attachment_type": None if unsent else m["attachment_type"],
+            "attachment_name": None if unsent else m["attachment_original_name"],
+            "status": status_of(m["is_seen"], m["delivered_at"]),
             "is_seen": bool(m["is_seen"]),
             "seen_at": m["seen_at"],
-            "is_edited": bool(m["is_edited"]),
+            "delivered_at": m["delivered_at"],
+            "is_edited": bool(m["is_edited"]) and not unsent,
+            "is_unsent": unsent,
+            "unsent_at": m["unsent_at"],
+            "reply_to": None if unsent else reply_embed(replies.get(m["reply_to_id"]), None, names),
             "created_at": m["created_at"],
+            "updated_at": m["updated_at"],
         })
     return {
-        "chat": {"id": chat["id"], "student": student, "faculty": faculty, "message_count": len(messages),
+        "chat": {"id": chat["id"], "student": student, "faculty": faculty,
+                 "message_count": admin_queries.count_messages(chat_id),
                  "created_at": chat["created_at"], "updated_at": chat["updated_at"]},
         "messages": messages,
+        "last_id": max([after_id, *(m["id"] for m in messages)]),
+        "server_time": server_time,
     }
 
 
@@ -334,8 +359,17 @@ def admin_item(row, current_user_id):
         "id": row["id"], "full_name": row["full_name"], "email": row["email"],
         "profile_picture_url": profile_picture_url(row["profile_picture_path"]),
         "is_active": bool(row["is_active"]), "is_you": row["id"] == current_user_id,
+        "is_primary": get_settings().is_primary_admin(row["email"]),
+        "passkey_count": sq.count_passkeys(row["id"]),
         "created_at": row["created_at"], "last_login_at": row["last_login_at"],
     }
+
+
+def primary_admin(user: CurrentUser = Depends(require_role("ADMIN"))) -> CurrentUser:
+    """Appointing, deactivating and resetting admins is reserved for the primary administrator."""
+    if not get_settings().is_primary_admin(user["email"]):
+        raise ApiError(403, "forbidden", "Only the primary administrator can manage admin accounts.")
+    return user
 
 
 @router.get("/admins")
@@ -345,16 +379,31 @@ def list_admins(user: CurrentUser = Depends(require_role("ADMIN"))):
 
 
 @router.post("/admins", status_code=201)
-def create_admin(body: AdminCreateIn, user: CurrentUser = Depends(require_role("ADMIN"))):
+def create_admin(body: AdminCreateIn, user: CurrentUser = Depends(primary_admin)):
+    """Primary admin only. The generated temporary password is returned ONCE."""
     with service_errors():
-        full_name = auth_service.validate_required(body.full_name, "Full name", "full_name")
-        email = auth_service.validate_email(body.email, "Email", "email")
-        if body.password != body.confirm_password:
-            raise auth_service.ValidationError("Passwords do not match.", "confirm_password")
-        password_hash = auth_service.hash_password(body.password, disallow=(email,))
-        if email != get_settings().sole_admin_email.strip().lower():
-            raise ConflictError("Only the configured owner email can receive admin access.", "email")
-        if queries.get_user_by_email(email):
-            raise ConflictError("An account with this email already exists.", "email")
-        new_id = queries.create_user("ADMIN", email, password_hash, full_name)
-    return ok("Admin account created.", admin=admin_item(admin_queries.get_admin(new_id), user["id"]))
+        new_id, temporary_password = auth_service.create_admin_account(body.full_name, body.email)
+    return ok("Admin account created. Share the temporary password securely; it is shown only once.",
+              admin=admin_item(admin_queries.get_admin(new_id), user["id"]), temporary_password=temporary_password)
+
+
+@router.post("/admins/{admin_id}/active")
+def set_admin_active(admin_id: int, body: ActiveIn, user: CurrentUser = Depends(primary_admin)):
+    with service_errors():
+        auth_service.set_admin_active(user["id"], admin_id, body.active)
+    return ok("Admin reactivated." if body.active else "Admin deactivated.",
+              admin=admin_item(admin_queries.get_admin(admin_id), user["id"]))
+
+
+@router.post("/admins/{admin_id}/reset-password")
+def reset_admin_password(admin_id: int, user: CurrentUser = Depends(primary_admin)):
+    with service_errors():
+        temporary_password = auth_service.reset_admin_password(admin_id)
+    return ok("Temporary password set. Share it securely; it is shown only once.", temporary_password=temporary_password)
+
+
+@router.delete("/admins/{admin_id}/passkeys")
+def revoke_admin_passkeys(admin_id: int, user: CurrentUser = Depends(primary_admin)):
+    with service_errors():
+        removed = auth_service.revoke_admin_passkeys(admin_id)
+    return ok("Passkeys revoked.", removed=removed)

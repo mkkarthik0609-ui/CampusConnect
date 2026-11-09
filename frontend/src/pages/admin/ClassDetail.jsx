@@ -5,7 +5,7 @@ import { ClassPath } from "@/components/app/ClassPath";
 import { StatusPill } from "@/components/app/StatusPill";
 import { Notice } from "@/components/app/Notice";
 import { EmptyState } from "@/components/app/EmptyState";
-import { PageLoader } from "@/components/app/PageLoader";
+import { PageHeaderSkeleton, SkeletonRegion, TableSkeleton } from "@/components/app/skeletons";
 import { adminApi, adminKeys } from "@/lib/endpoints";
 import { pluralize } from "@/lib/format";
 import { PersonCell, QueryError } from "@/features/admin/common";
@@ -16,7 +16,14 @@ export default function AdminClassDetail() {
   const { sectionId } = useParams();
   const q = useQuery({ queryKey: adminKeys.classDetail(sectionId), queryFn: () => adminApi.classDetail(sectionId) });
 
-  if (q.isPending) return <PageLoader />;
+  if (q.isPending) {
+    return (
+      <SkeletonRegion label="Loading class">
+        <PageHeaderSkeleton />
+        <TableSkeleton rows={6} cols={4} />
+      </SkeletonRegion>
+    );
+  }
   if (q.isError) {
     return (
       <>
@@ -32,7 +39,7 @@ export default function AdminClassDetail() {
   return (
     <>
       <PageHeader
-        title={<ClassPath cls={c} size="lg" />}
+        title={<ClassPath cls={c} size="lg" className="font-sans tracking-normal" />}
         documentTitle={`Class ${c.label}`}
         back={{ to: "/admin/classes", label: "All classes" }}
         description={`${pluralize(c.student_count, "student")} registered, ${pluralize(c.faculty_count, "faculty member")} assigned.`}
@@ -48,7 +55,7 @@ export default function AdminClassDetail() {
       <section aria-label="Faculty" className="mb-8">
         <SectionHeading title="Faculty" />
         {faculty.length ? (
-          <ul className="m-0 grid list-none gap-x-6 gap-y-1 p-0 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="m-0 grid grid-cols-1 list-none gap-x-6 gap-y-1 p-0 sm:grid-cols-2 lg:grid-cols-3">
             {faculty.map((f) => (
               <li key={f.assignment_id} className="rounded-lg border bg-card px-4 py-3">
                 <PersonCell name={f.full_name} src={f.profile_picture_url} sub={f.faculty_code} mono />

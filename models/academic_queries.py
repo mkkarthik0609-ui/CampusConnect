@@ -299,7 +299,7 @@ def search_students_in_faculty_scope(faculty_id, query, limit=30):
                    u.full_name, u.profile_picture_path
             FROM students st
             JOIN users u ON u.id = st.user_id AND u.is_active = 1
-            WHERE st.usn LIKE ? ESCAPE '\' OR u.full_name LIKE ? ESCAPE '\'
+            WHERE st.usn LIKE ? ESCAPE '\\' OR u.full_name LIKE ? ESCAPE '\\'
             ORDER BY st.usn LIMIT ?""",
         (like, like, limit),
     ).fetchall()

@@ -5,12 +5,12 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import Field, StrictInt, field_validator
 
-from api.deps import (ApiModel, CurrentUser, Stripped, client_ip, current_user_optional, ok, service_errors)
+from api.deps import (ApiModel, CurrentUser, CustomClassIn, Stripped, client_ip, current_user_optional, ok, service_errors)
 from api.errors import ApiError
 from api.schemas import user_payload
 from models import academic_queries as aq
 from models import queries
-from services import auth_service, captcha_service, notification_service as notif, session_service
+from services import auth_service, captcha_service, notification_service as notif, passkey_service, session_service
 from services.auth_service import ValidationError
 
 router = APIRouter(prefix="/api/auth")
@@ -33,11 +33,17 @@ class AdminLoginIn(ApiModel):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class AdminPasskeyIn(ApiModel):
+    credential: dict
+    identifier: Stripped = Field(default="", max_length=254)
+
+
 class StudentSignupIn(CaptchaIn):
     college_email: Stripped = Field(min_length=1, max_length=254)
     full_name: Stripped = Field(min_length=1, max_length=120)
     usn: Stripped = Field(min_length=1, max_length=32)
-    section_id: StrictInt
+    section_id: Optional[StrictInt] = None
+    custom_class: Optional[CustomClassIn] = None  # typed class when theirs is not listed
     phone: Stripped = Field(min_length=1, max_length=32)
     personal_email: Stripped = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=1024)
@@ -121,9 +127,35 @@ def login(body: LoginIn, request: Request):
 
 @router.post("/admin-login")
 def admin_login(body: AdminLoginIn, request: Request):
+    """Email + password for an active admin account (the real password is always verified)."""
     with service_errors():
         try:
             row = auth_service.authenticate_admin(body.identifier, body.password, ip=client_ip(request))
+        except auth_service.LockoutError:
+            raise
+        except ValidationError as exc:
+            raise ApiError(401, "invalid_credentials", str(exc)) from exc
+    token = session_service.start_session(request.session, row)
+    return ok("Welcome back!", user=user_payload(row), csrf_token=token)
+
+
+@router.post("/admin-passkey/options")
+def admin_passkey_options(request: Request):
+    """WebAuthn assertion options with an empty allowCredentials list (discoverable credentials)."""
+    with service_errors():
+        options = passkey_service.authentication_options(request.session, request.headers.get("origin"))
+    return JSONResponse({"options": options}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/admin-passkey/verify")
+def admin_passkey_verify(body: AdminPasskeyIn, request: Request):
+    """Same response as /admin-login. `identifier` is optional; when given it must be the credential owner."""
+    with service_errors():
+        try:
+            row = passkey_service.authenticate_admin_passkey(
+                request.session, body.credential, body.identifier, ip=client_ip(request))
+        except auth_service.LockoutError:
+            raise
         except ValidationError as exc:
             raise ApiError(401, "invalid_credentials", str(exc)) from exc
     token = session_service.start_session(request.session, row)
@@ -146,6 +178,7 @@ def signup_student(body: StudentSignupIn, request: Request):
         _require_same_passwords(body.password, body.confirm_password)
         auth_service.register_student({
             "full_name": body.full_name, "usn": body.usn, "section_id": body.section_id,
+            "custom_class": body.custom_class.model_dump() if body.custom_class else None,
             "phone": body.phone, "personal_email": body.personal_email,
             "college_email": body.college_email.lower(), "password": body.password,
         })

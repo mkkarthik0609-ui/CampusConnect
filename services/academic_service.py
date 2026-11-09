@@ -6,12 +6,27 @@ import re
 
 from models import academic_queries as aq
 from models import admin_queries
+from models.database import get_db
 
 DEFAULT_BRANCH = "CSE"
 DEFAULT_DEPARTMENTS = ["AIML", "AIDE", "GenAI", "Cybersecurity", "Blockchain", "IoT"]
-ADDITIONAL_DEPARTMENTS = ["CSE", "ECE", "EEE", "ISE", "MECH"]
+LEGACY_PLACEHOLDER_DEPARTMENTS = ["CSE", "ECE", "EEE", "ISE", "MECH"]
 DEFAULT_YEARS = 4
 DEFAULT_SECTIONS = ["A", "B", "C"]
+
+# Extra branches seeded on top of the CSE defaults (Settings.seed_extra_branches). Same 4 years x A-C.
+# Anything still missing can be typed by students/faculty (ensure_class) or added by Admin.
+EXTRA_STRUCTURE = {
+    "CSE": ["Data Science", "Cloud Computing"],
+    "ISE": ["General", "Data Science", "Cybersecurity"],
+    "ECE": ["General", "VLSI", "Embedded Systems", "Communication Systems"],
+    "EEE": ["General", "Power Systems", "Power Electronics"],
+    "Mechanical": ["General", "Robotics", "Automotive"],
+    "Civil": ["General", "Structural"],
+    "Chemical": ["General"],
+    "Biotechnology": ["General"],
+    "AI & Data Science": ["General"],
+}
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 &.\-]{0,39}$")
 SECTION_RE = re.compile(r"^[A-Za-z]$")  # simple labels only: A, B, C ... (never "3A")
@@ -66,14 +81,36 @@ def seed_default_structure():
     for dept in DEFAULT_DEPARTMENTS:
         if dept.lower() in existing:
             continue
-        dept_id = aq.create_department(branch_id, dept)
-        for n in range(1, DEFAULT_YEARS + 1):
-            year_id = aq.create_year(dept_id, year_label(n), n)
-            for sec in DEFAULT_SECTIONS:
-                aq.create_section(year_id, sec)
-    for dept in ADDITIONAL_DEPARTMENTS:
-        if dept.lower() not in existing:
-            aq.create_department(branch_id, dept)
+        _create_department_tree(branch_id, dept)
+    # Older versions seeded year-less placeholder departments (CSE/ECE/...) that only polluted the
+    # department lists; drop them when nothing hangs below them.
+    db = get_db()
+    marks = ",".join("?" * len(LEGACY_PLACEHOLDER_DEPARTMENTS))
+    db.execute(
+        f"DELETE FROM departments WHERE branch_id = ? AND name IN ({marks}) "
+        "AND NOT EXISTS (SELECT 1 FROM academic_years y WHERE y.department_id = departments.id)",
+        (branch_id, *LEGACY_PLACEHOLDER_DEPARTMENTS),
+    )
+    db.commit()
+
+
+def _create_department_tree(branch_id, name):
+    dept_id = aq.create_department(branch_id, name)
+    for n in range(1, DEFAULT_YEARS + 1):
+        year_id = aq.create_year(dept_id, year_label(n), n)
+        for sec in DEFAULT_SECTIONS:
+            aq.create_section(year_id, sec)
+
+
+def seed_extra_structure():
+    """Add the EXTRA_STRUCTURE branches/departments that are missing (idempotent; case-insensitive)."""
+    branches = {b["name"].lower(): b["id"] for b in aq.list_branches()}
+    for branch, departments in EXTRA_STRUCTURE.items():
+        branch_id = branches.get(branch.lower()) or aq.create_branch(branch)
+        existing = {d["name"].lower() for d in aq.list_departments(branch_id)}
+        for dept in departments:
+            if dept.lower() not in existing:
+                _create_department_tree(branch_id, dept)
 
 
 def _legacy_combo(branch, department, year, section):
@@ -162,6 +199,36 @@ def resolve_section(section_id):
     if not combo or not combo["chain_active"]:
         raise AcademicError("The selected class does not exist. Please choose from the list.")
     return combo
+
+
+def ensure_class(branch, department, year, section):
+    """Get-or-create a class from typed names (students / faculty whose class is not listed).
+    Case-insensitive match on every level; a level Admin switched off is never re-enabled.
+    Returns the combo row. Only call from captcha- or login-protected routes."""
+    branch_name = _clean_name(branch, "Branch")
+    dept_name = _clean_name(department, "Department")
+    year_name, year_no = normalize_year(year)
+    sec_name = normalize_section(section)
+
+    def find(rows, name):
+        return next((r for r in rows if r["name"].lower() == name.lower()), None)
+
+    b = find(aq.list_branches(), branch_name)
+    b_id = b["id"] if b else aq.create_branch(branch_name)
+    d = find(aq.list_departments(b_id), dept_name) if b else None
+    d_id = d["id"] if d else aq.create_department(b_id, dept_name)
+    y = find(aq.list_years(d_id), year_name) if d else None
+    y_id = y["id"] if y else aq.create_year(d_id, year_name, year_no)
+    s = find(aq.list_sections(y_id), sec_name) if y else None
+    s_id = s["id"] if s else aq.create_section(y_id, sec_name)
+    return resolve_section(s_id)  # raises if any level was deactivated by Admin
+
+
+def resolve_class(section_id=None, custom=None):
+    """A listed ``section_id`` or a typed ``custom`` dict {branch, department, year, section}."""
+    if custom:
+        return ensure_class(custom.get("branch"), custom.get("department"), custom.get("year"), custom.get("section"))
+    return resolve_section(section_id)
 
 
 def combo_label(combo):

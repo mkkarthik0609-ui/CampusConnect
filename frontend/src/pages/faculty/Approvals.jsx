@@ -44,13 +44,13 @@ export default function FacultyApprovals() {
         items.length ? (
           <RowList label="Pending student profile changes" className="max-w-3xl">
             {items.map((r) => (
-              <li key={r.id} className="grid gap-4 px-4 py-4 sm:grid-cols-[1fr_auto] sm:items-start">
-                <div className="grid min-w-0 gap-3">
-                  <div className="grid gap-1.5">
+              <li key={r.id} className="grid grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-[1fr_auto] sm:items-start">
+                <div className="grid grid-cols-1 min-w-0 gap-3">
+                  <div className="grid grid-cols-1 gap-1.5">
                     <PersonCell name={r.student?.full_name || r.requester_name} src={r.student?.profile_picture_url} code={r.student?.usn} extra={<span>asked {timeAgo(r.created_at)}</span>} />
                     {r.student?.class ? <div className="pl-12"><ClassPath cls={r.student.class} /></div> : null}
                   </div>
-                  <div className="grid gap-2 rounded-md bg-sunken px-3.5 py-3 sm:ml-12">
+                  <div className="grid grid-cols-1 gap-2 rounded-md bg-sunken px-3.5 py-3 sm:ml-12">
                     <p className="m-0 text-xs font-bold tracking-[0.04em] text-muted-foreground uppercase">Wants to change</p>
                     <ChangedFields changes={r.requested_changes} />
                     {r.reason ? <p className="m-0 text-sm text-ink-2">Reason: {r.reason}</p> : null}

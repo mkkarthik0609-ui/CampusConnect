@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/PageHeader";
 import { EmptyState } from "@/components/app/EmptyState";
-import { ListSkeleton } from "@/components/app/PageLoader";
+import { NotificationsSkeleton } from "@/components/app/skeletons";
 import { Notice } from "@/components/app/Notice";
 import { useAuth } from "@/auth/AuthProvider";
 import { notificationsApi } from "@/lib/endpoints";
@@ -56,7 +56,7 @@ export default function Notifications() {
 
       <div className="rounded-lg border bg-card p-[clamp(0.5rem,1.5vw,1rem)] shadow-sm">
         {query.isPending ? (
-          <ListSkeleton rows={4} className="p-2" />
+          <NotificationsSkeleton />
         ) : query.isError ? (
           <Notice tone="danger" title="Could not load your notifications">
             {query.error.message}

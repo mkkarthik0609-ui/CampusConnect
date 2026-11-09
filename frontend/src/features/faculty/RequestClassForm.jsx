@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Send } from "lucide-react";
-import { ClassPicker } from "@/components/app/ClassPicker";
+import { ClassPicker, classPayload } from "@/components/app/ClassPicker";
 import { FormField } from "@/components/app/FormField";
 import { SubmitButton } from "@/components/app/SubmitButton";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,14 +14,16 @@ import { useRefreshFaculty } from "@/features/faculty/hooks";
 export function RequestClassForm() {
   const refresh = useRefreshFaculty();
   const [sectionId, setSectionId] = useState("");
+  const [classInfo, setClassInfo] = useState(null);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
 
   const request = useMutation({
-    mutationFn: () => facultyApi.requestClass({ section_id: Number(sectionId), ...(note.trim() ? { note: note.trim() } : {}) }),
+    mutationFn: () => facultyApi.requestClass({ ...classPayload(sectionId, classInfo), ...(note.trim() ? { note: note.trim() } : {}) }),
     onSuccess: (data) => {
       toast.success(data.message || "Request sent to Admin.");
       setSectionId("");
+      setClassInfo(null);
       setNote("");
       setError("");
       refresh();
@@ -34,7 +36,7 @@ export function RequestClassForm() {
 
   function submit(e) {
     e.preventDefault();
-    if (!sectionId) {
+    if (!sectionId && !classInfo?.custom) {
       setError("Choose a branch, department, year and section first.");
       return;
     }
@@ -43,11 +45,12 @@ export function RequestClassForm() {
   }
 
   return (
-    <form onSubmit={submit} noValidate className="grid gap-5 rounded-lg border bg-card p-5 shadow-sm">
+    <form onSubmit={submit} noValidate className="grid grid-cols-1 gap-5 rounded-lg border bg-card p-5 shadow-sm">
       <ClassPicker
+        allowCustom
         value={sectionId}
         error={error}
-        onChange={(id) => { setSectionId(id); if (id) setError(""); }}
+        onChange={(id, info) => { setSectionId(id); setClassInfo(info); if (id || info) setError(""); }}
         disabled={request.isPending}
       />
       <FormField label="Note to Admin" hint="Optional. For example which subject you teach this section." error={note.length > 500 ? "Keep the note under 500 characters." : ""}>

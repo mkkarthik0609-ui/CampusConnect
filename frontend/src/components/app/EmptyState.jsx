@@ -10,7 +10,7 @@ export function EmptyState({ icon: Icon = Inbox, title, children, action, compac
   if (compact) {
     return (
       <div className={cn("py-4 text-muted-foreground", className)}>
-        {title ? <p className="font-semibold text-ink-2">{title}</p> : null}
+        {title ? <p className="font-medium text-ink-2">{title}</p> : null}
         {children ? <div className="text-sm">{children}</div> : null}
         {action ? <div className="mt-3">{action}</div> : null}
       </div>
@@ -18,11 +18,11 @@ export function EmptyState({ icon: Icon = Inbox, title, children, action, compac
   }
   return (
     <div className={cn("grid justify-items-center gap-1.5 px-4 py-[clamp(1.5rem,4vw,2.5rem)] text-center", className)}>
-      <span className="mb-1.5 inline-flex size-[54px] items-center justify-center rounded-2xl bg-primary-soft text-primary-ink">
-        <Icon aria-hidden="true" className="size-6" />
+      <span className="mb-2 inline-flex size-14 items-center justify-center rounded-full border border-line-strong border-dashed text-muted-foreground">
+        <Icon aria-hidden="true" className="size-6" strokeWidth={1.5} />
       </span>
-      {title ? <h2 className="font-display text-lg font-[650] text-balance">{title}</h2> : null}
-      {children ? <div className="grid max-w-[34rem] justify-items-center gap-3 text-muted-foreground">{children}</div> : null}
+      {title ? <h2 className="font-display text-xl font-normal tracking-[-0.02em] text-balance">{title}</h2> : null}
+      {children ? <div className="grid grid-cols-1 max-w-[34rem] justify-items-center gap-3 text-muted-foreground">{children}</div> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );

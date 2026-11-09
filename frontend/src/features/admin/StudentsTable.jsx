@@ -12,7 +12,7 @@ import { formatDate } from "@/lib/format";
 import { PersonCell } from "@/features/admin/common";
 
 function ClassCell({ s }) {
-  if (s.class) return <ClassPath cls={s.class} />;
+  if (s.class) return <ClassPath cls={s.class} className="sm:flex-nowrap sm:whitespace-nowrap" />;
   const l = s.legacy_class;
   return (
     <div className="flex flex-col items-start gap-1 max-sm:items-end">

@@ -39,7 +39,7 @@ export default function AdminClasses() {
     <>
       <PageHeader title="Classes" description="Every class with the faculty assigned to it. Open one to see its students." />
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
         <SearchBox value={search} onChange={setSearch} label="Search classes" placeholder="Class, faculty name or ID" className="sm:col-span-2 lg:col-span-1" />
         <FilterSelect label="Branch" allLabel="All branches" value={branch} onChange={(v) => { setBranch(v); setDepartment(""); }} options={branches} />
         <FilterSelect label="Department" allLabel="All departments" value={department} onChange={setDepartment} options={departments} />

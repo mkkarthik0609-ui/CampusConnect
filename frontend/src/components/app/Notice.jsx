@@ -19,11 +19,11 @@ export function Notice({ tone = "info", title, children, className, icon: IconOv
   return (
     <div
       role={tone === "danger" || tone === "warning" ? "alert" : "status"}
-      className={cn("flex items-start gap-3 rounded-lg border px-4 py-3 text-[0.9375rem]", box, className)}
+      className={cn("flex items-start gap-3 rounded-[10px] border px-4 py-3 text-[0.9375rem]", box, className)}
     >
       <I aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
       <div className="min-w-0 [&_a]:font-semibold [&_a]:text-inherit">
-        {title ? <p className="font-semibold">{title}</p> : null}
+        {title ? <p className="font-medium">{title}</p> : null}
         {children ? <div className={title ? "mt-0.5" : undefined}>{children}</div> : null}
       </div>
     </div>

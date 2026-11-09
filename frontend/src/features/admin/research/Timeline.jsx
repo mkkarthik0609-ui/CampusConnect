@@ -107,7 +107,7 @@ export function Timeline({ timeline }) {
 
       <Legend />
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {METHODS.map((m) => {
           const blocks = timeline.methods?.[m.id] || [];
           const dayBlocks = blocks.filter((b) => b.day === day);
@@ -128,7 +128,7 @@ export function Timeline({ timeline }) {
                   <span key={tk} className="num absolute -translate-x-1/2 first:translate-x-0 last:-translate-x-full" style={{ left: `${(tk / dayMin) * 100}%` }}>{clock(tk, startHour).slice(0, 5)}</span>
                 ))}
               </div>
-              <div className="grid gap-2.5">
+              <div className="grid grid-cols-1 gap-2.5">
                 {timeline.faculty.map((f) => (
                   <Lane key={f.faculty_id} f={f} day={day} dayMin={dayMin} color={m.css} blocks={blocks} />
                 ))}

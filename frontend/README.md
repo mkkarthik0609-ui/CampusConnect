@@ -1,7 +1,7 @@
 # Campus Connect frontend
 
 React 19 (JavaScript, no TypeScript) + Vite 8 + Tailwind CSS v4 + shadcn/ui (Radix, hand-themed) + TanStack Query +
-React Router 7 + Framer Motion (`motion`, landing page only). The backend is the FastAPI JSON API in `../api`
+React Router 7 + GSAP and three.js (landing and auth panel) + Framer Motion (`motion`). The backend is the FastAPI JSON API in `../api`
 (contract: `../docs/api/CONVENTIONS.md`, wiring: `../docs/api/ARCHITECTURE.md`, per-area endpoint docs in `../docs/api/*.md`).
 
 ## Run it
@@ -31,13 +31,15 @@ The mock is imported only behind `import.meta.env.DEV`, so it never ships in a p
 - Tailwind **v4** with `@tailwindcss/vite` (no `tailwind.config`; theme lives in `src/index.css`). shadcn CLI
   (`npx shadcn@latest add <component>`) works in JS mode (`components.json` has `"tsx": false`) and generates `.jsx`.
 - Alias `@` -> `src` (`vite.config.js` + `jsconfig.json`).
-- Fonts are self-hosted from npm (`@fontsource-variable/*`): Bricolage Grotesque (headings, numerals), Figtree (UI), JetBrains Mono (IDs, codes only).
-- **Do not create a directory named `public`** anywhere under `frontend/src`: the repo's root `.gitignore` ignores `public/`, which hides the files from git *and* from Tailwind's class scanner. (The landing/login pages live in `src/pages/site/`; the favicon is `src/assets/favicon.svg`.)
+- Fonts are self-hosted from npm (`@fontsource/*`, no CDN): Poppins (headings, numerals, wordmark), Outfit (UI), JetBrains Mono (IDs, codes only). Palette: near-black `#0a0a0b` / near-white `#f7f7f5` plus one champagne accent; see `../docs/DESIGN.md`.
+- Static SEO/PWA files live in `public/` (`robots.txt`, `sitemap.xml`, `manifest.webmanifest`, `favicon.svg`, `og-image.png`, icons). Per-route `<head>` (title, description, canonical, Open Graph, robots, JSON-LD) is set by `src/hooks/useMeta.js`; only `/` is indexable.
+- **Do not create a directory named `public`** anywhere under `frontend/src`: the repo's root `.gitignore` ignores `public/`, which hides the files from git *and* from Tailwind's class scanner. (The landing/login pages live in `src/pages/site/`; the favicon source is `src/assets/favicon.svg`, served from `public/favicon.svg`.)
 
 ## File map
 
 ```
-index.html                 pre-paint theme script, favicon
+index.html                 pre-paint theme script, head defaults (SEO, OG, theme-color, icons)
+public/                    robots.txt, sitemap.xml, manifest, favicon/og/touch icons (served as-is, before rewrites)
 vite.config.js             alias, dev/preview proxy, manual chunks (motion, query, router, radix)
 components.json            shadcn config (JS, aliases)
 src/
@@ -57,7 +59,7 @@ src/
   auth/
     AuthProvider.jsx       useAuth(): session, role helpers, unread counters (30 s poll), login/logout
     guards.jsx             RequireAuth, RequireRole, GuestOnly, AppRedirect
-  hooks/                   usePageTitle, useDebouncedValue, useMediaQuery, useAcademicTree, useFacultyDepartments, useMeta
+  hooks/                   useMeta (head/SEO), usePageTitle, useDebouncedValue, useMediaQuery, useAcademicTree, useFacultyDepartments
   components/
     ui/                    shadcn primitives, themed (button, input, select, dialog, sheet, table, tabs, ...)
     app/                   shared Campus Connect components (below)
@@ -136,8 +138,8 @@ so `unread.notifications` / `unread.messages` stay current; after an action that
 
 ## Theme and design tokens
 
-Direction: **ink & saffron**: deep ink-navy chrome, cobalt for action, saffron only for what needs attention, cool paper
-surfaces (light) / ink-blue surfaces (dark). Tokens are CSS variables in `src/index.css` (`:root` and `.dark`) exposed to
+Direction: **onyx & paper**: near-black / near-white inverted themes, ink-on-paper primary action, one champagne accent
+(`saffron` tokens) only for what needs attention. Tokens are CSS variables in `src/index.css` (`:root` and `.dark`) exposed to
 Tailwind through `@theme inline`:
 
 | Use | Tailwind classes |
@@ -149,12 +151,12 @@ Tailwind through `@theme inline`:
 | attention | `bg-saffron text-on-saffron`, soft: `bg-saffron-soft text-saffron-ink` |
 | semantic | `bg-ok text-ok-ink`, `bg-warn text-warn-ink`, `bg-danger text-danger-ink`, `bg-info text-info-ink`, `bg-neutral text-neutral-ink` (+ `border-*-line`) |
 | dark chrome (sidebar, landing bands) | `bg-nav text-nav-ink text-nav-muted bg-nav-hover bg-nav-active border-nav-line` |
-| type | `font-sans` (Figtree), `font-display` (Bricolage), `font-mono` (IDs/codes only) |
+| type | `font-sans` (Outfit), `font-display` (Poppins), `font-mono` (IDs/codes only) |
 | depth | `shadow-sm` (cards), `shadow-md` (popovers / floating) |
 | radii | `rounded-md` 10px (controls), `rounded-lg` 12px (cards), `rounded-xl` 18px (auth card / dialogs) |
 
 Rules: never hard-code hex in components (use tokens so dark mode works); saffron text on light surfaces fails AA, use
-`text-saffron-ink` there; one primary (cobalt) action per view; headings are `font-display`; IDs (USN, Faculty ID, codes) are
+`text-saffron-ink` there; one primary (ink) action per view; headings are `font-display`; IDs (USN, Faculty ID, codes) are
 `font-mono`. Dark mode is the `.dark` class on `<html>`: signed in -> the user's saved `theme` (toggle calls
 `POST /api/account/theme`); signed out -> `prefers-color-scheme`. A pre-paint script in `index.html` avoids a flash.
 `useTheme()` gives `{ theme, setTheme, toggle }`.
@@ -173,7 +175,7 @@ Rules: never hard-code hex in components (use tokens so dark mode works); saffro
 | `DataTable` | table that becomes labelled cards below 40rem; loading / error / empty built in |
 | `useConfirm()`, `usePrompt()`, `ConfirmDialog`, `PromptDialog` | replace `window.confirm` / `window.prompt` (e.g. meeting-cancel reason: `await prompt({ title, label: "Reason", required: true })`) |
 | `FormField` | label + control + hint + error with correct `for`/`aria-describedby`/`aria-invalid` |
-| `PasswordInput`, `SubmitButton`, `Notice`, `StatTile`, `Spinner`/`ListSkeleton`/`PageLoader` | form and feedback pieces |
+| `PasswordInput`, `SubmitButton`, `Notice`, `StatTile`, `Spinner`/`PageLoader`, `skeletons.jsx` (`PageSkeleton`, `StatTilesSkeleton`, `TableSkeleton`, `CardListSkeleton`, `FormSkeleton`, `ProfileSkeleton`, `ClassTreeSkeleton`, `MeetingCardsSkeleton`) | form and feedback pieces |
 | `ThemeToggle`, `NotificationBell`, `UserMenu`, `Brand`/`BrandMark` | chrome |
 | `PagePlaceholder` | the stand-in on unbuilt pages |
 

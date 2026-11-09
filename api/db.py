@@ -130,21 +130,86 @@ def _migrate(db: sqlite3.Connection) -> None:
     )
     db.execute("CREATE INDEX IF NOT EXISTS idx_admin_messages_pair ON admin_messages(sender_user_id, recipient_user_id, created_at)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_admin_messages_recipient ON admin_messages(recipient_user_id, is_seen, created_at)")
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS admin_passkeys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            credential_id TEXT NOT NULL UNIQUE,
+            public_key BLOB NOT NULL,
+            sign_count INTEGER NOT NULL DEFAULT 0,
+            transports TEXT,
+            label TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used_at TEXT
+        )"""
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_admin_passkeys_user ON admin_passkeys(user_id)")
 
 
-def _reconcile_sole_admin(db: sqlite3.Connection, settings: Settings) -> None:
-    """Keep the configured owner as the only active admin account."""
-    email = settings.sole_admin_email.strip().lower()
+def _reconcile_primary_admin(db: sqlite3.Connection, settings: Settings) -> None:
+    """The primary admin can never stay deactivated (an existing admin row is re-activated at start)."""
     db.execute(
-        "UPDATE users SET is_active = 0, updated_at = datetime('now') "
-        "WHERE role = 'ADMIN' AND lower(email) <> ?",
-        (email,),
+        "UPDATE users SET is_active = 1, updated_at = datetime('now') "
+        "WHERE role = 'ADMIN' AND is_active = 0 AND lower(email) = ?",
+        (settings.primary_admin_email.strip().lower(),),
     )
-    db.execute(
-        "UPDATE users SET role = 'ADMIN', is_active = 1, updated_at = datetime('now') "
-        "WHERE lower(email) = ?",
-        (email,),
-    )
+
+
+_ADMIN_MESSAGES_DDL = """CREATE TABLE IF NOT EXISTS admin_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_text TEXT,
+    is_seen INTEGER NOT NULL DEFAULT 0,
+    seen_at TEXT,
+    delivered_at TEXT,
+    is_edited INTEGER NOT NULL DEFAULT 0,
+    is_unsent INTEGER NOT NULL DEFAULT 0,
+    unsent_at TEXT,
+    reply_to_id INTEGER REFERENCES admin_messages(id) ON DELETE SET NULL,
+    hidden_by_sender INTEGER NOT NULL DEFAULT 0,
+    hidden_by_recipient INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)"""
+_NEW_MESSAGE_COLUMNS = {
+    "delivered_at": "TEXT",
+    "is_unsent": "INTEGER NOT NULL DEFAULT 0",
+    "unsent_at": "TEXT",
+    "reply_to_id": "INTEGER REFERENCES {table}(id) ON DELETE SET NULL",
+    "hidden_by_sender": "INTEGER NOT NULL DEFAULT 0",
+    "hidden_by_recipient": "INTEGER NOT NULL DEFAULT 0",
+}
+
+
+def _migrate_messages(db: sqlite3.Connection) -> None:
+    """WhatsApp-style messaging columns (delivery, unsend, reply, delete-for-me) on ``messages`` and
+    ``admin_messages``. Idempotent. Runs after schema.sql, so indexes on the new columns live here."""
+    row = db.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'admin_messages'").fetchone()
+    if row and "CHECK (length(trim(message_text))" in (row[0] or ""):
+        # An unsent message has no text, so the old non-blank CHECK has to go: SQLite can only do that by rebuilding.
+        db.execute("DROP INDEX IF EXISTS idx_admin_messages_pair")
+        db.execute("DROP INDEX IF EXISTS idx_admin_messages_recipient")
+        db.execute("ALTER TABLE admin_messages RENAME TO admin_messages_old")
+        db.execute(_ADMIN_MESSAGES_DDL)
+        db.execute(
+            """INSERT INTO admin_messages (id, sender_user_id, recipient_user_id, message_text, is_seen, seen_at,
+                                           created_at, updated_at)
+               SELECT id, sender_user_id, recipient_user_id, message_text, is_seen, seen_at, created_at, updated_at
+               FROM admin_messages_old"""
+        )
+        db.execute("DROP TABLE admin_messages_old")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_admin_messages_pair ON admin_messages(sender_user_id, recipient_user_id, created_at)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_admin_messages_recipient ON admin_messages(recipient_user_id, is_seen, created_at)")
+    for table in ("messages", "admin_messages"):
+        have = _columns(db, table)
+        wanted = dict(_NEW_MESSAGE_COLUMNS)
+        if table == "admin_messages":
+            wanted["is_edited"] = "INTEGER NOT NULL DEFAULT 0"
+        for name, ddl in wanted.items():
+            if name not in have:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl.format(table=table)}")
+        db.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_updated ON {table}(updated_at)")
 
 
 def init_db(settings: Optional[Settings] = None) -> None:
@@ -161,10 +226,13 @@ def init_db(settings: Optional[Settings] = None) -> None:
         with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
             db.executescript(f.read())
         _migrate(db)
-        _reconcile_sole_admin(db, settings)
+        _migrate_messages(db)
+        _reconcile_primary_admin(db, settings)
         db.commit()
         from models import security_queries
         security_queries.ensure_schema()
         from services import academic_service
         academic_service.seed_default_structure()
+        if settings.seed_extra_branches:
+            academic_service.seed_extra_structure()
         academic_service.backfill_legacy_data()

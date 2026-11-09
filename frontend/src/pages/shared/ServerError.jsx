@@ -1,10 +1,10 @@
-import { Link, useRouteError } from "react-router-dom";
+import { ArrowRight, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ErrorPageLayout } from "@/components/app/ErrorPageLayout";
-import { ApiError } from "@/lib/api";
+import { ErrorPageLayout, PageLink } from "@/components/app/ErrorPageLayout";
 
 /**
- * 500 / "can't reach the server". Also the router's errorElement (uncaught render errors, failed lazy chunks).
+ * 500 / "can't reach the server". Used by the route and global error boundaries (components/app/ErrorBoundary.jsx)
+ * and by the auth gate. Works inside and outside the router.
  *   <ServerErrorPage standalone onRetry={fn} title="..." message="..." />
  */
 export function ServerErrorPage({ standalone = false, onRetry, title = "Something went wrong on our side", message }) {
@@ -15,28 +15,13 @@ export function ServerErrorPage({ standalone = false, onRetry, title = "Somethin
       standalone={standalone}
       actions={
         <>
-          <Button onClick={onRetry || (() => window.location.reload())}>Try again</Button>
-          <Button asChild variant="outline"><Link to="/">Back to home</Link></Button>
+          <Button size="pill" onClick={onRetry || (() => window.location.reload())}><RotateCw aria-hidden="true" /> Try again</Button>
+          <Button asChild size="pill" variant="outline"><PageLink to="/">Back to home <ArrowRight aria-hidden="true" /></PageLink></Button>
         </>
       }
     >
       <p>{message || "The page could not be shown. Nothing you entered has been lost on the server. Try again, and if it keeps happening let an administrator know."}</p>
     </ErrorPageLayout>
-  );
-}
-
-/** React Router errorElement. */
-export function RouteError() {
-  const error = useRouteError();
-  const chunkFailed = /dynamically imported module|Importing a module script failed|Loading chunk/i.test(String(error?.message || ""));
-  if (import.meta.env.DEV) console.error(error);
-  return (
-    <ServerErrorPage
-      standalone
-      title={chunkFailed ? "A new version of Campus Connect is available" : undefined}
-      message={chunkFailed ? "Reload the page to pick up the latest version." : error instanceof ApiError ? error.message : undefined}
-      onRetry={() => window.location.reload()}
-    />
   );
 }
 

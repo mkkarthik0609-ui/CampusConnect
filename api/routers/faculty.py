@@ -10,7 +10,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import Field, field_validator
 
-from api.deps import ApiModel, CurrentUser, Stripped, ok, require_role, service_errors
+from api.deps import ApiModel, CurrentUser, CustomClassIn, Stripped, ok, require_role, service_errors
 from api.errors import ApiError
 from api.routers._people import Cards
 from api.routers.meetings import meeting_item
@@ -114,7 +114,8 @@ class ProfileChangeIn(ApiModel):
 
 
 class ClassRequestIn(ApiModel):
-    section_id: int
+    section_id: Optional[int] = None
+    custom_class: Optional[CustomClassIn] = None
     note: Optional[Stripped] = Field(None, max_length=500)
 
 
@@ -211,7 +212,9 @@ def classes(user: CurrentUser = Depends(_FACULTY)):
 @router.post("/classes/request", status_code=201)
 def request_class(body: ClassRequestIn, user: CurrentUser = Depends(_FACULTY)):
     with service_errors():
-        request_id = assignment_service.faculty_request(user["faculty_id"], body.section_id, body.note)
+        request_id = assignment_service.faculty_request(
+            user["faculty_id"], body.section_id, body.note,
+            body.custom_class.model_dump() if body.custom_class else None)
     return ok("Request sent to Admin. You will get access once it is approved.", id=request_id)
 
 

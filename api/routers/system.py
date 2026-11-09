@@ -11,6 +11,13 @@ logger = logging.getLogger("campusconnect.api")
 router = APIRouter()
 
 
+@router.api_route("/health", methods=["GET", "HEAD"], include_in_schema=False)
+def health():
+    """External keep-alive ping (cron-job.org). Deliberately touches nothing: no DB, disk, session or
+    network, so it stays cheap. Use /healthz (below) when you want a real readiness check."""
+    return {"status": "ok"}
+
+
 @router.get("/healthz", include_in_schema=False)
 def healthz():
     """Unauthenticated liveness/readiness probe (Render health check)."""

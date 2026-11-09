@@ -44,11 +44,11 @@ export default function FacultyDashboard() {
       />
 
       {query.isError ? <QueryError error={query.error} onRetry={() => query.refetch()} title="Could not load your dashboard" /> : null}
-      {query.isPending ? <div className="grid gap-8"><ListSkeleton rows={3} /><ListSkeleton rows={2} /></div> : null}
+      {query.isPending ? <div className="grid grid-cols-1 gap-8"><ListSkeleton rows={3} /><ListSkeleton rows={2} /></div> : null}
 
       {data ? (
-        <div className="grid items-start gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_21rem]">
-          <div className="grid min-w-0 gap-8">
+        <div className="grid grid-cols-1 items-start gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_21rem]">
+          <div className="grid grid-cols-1 min-w-0 gap-8">
             {attention.length ? (
               <nav aria-label="Needs your attention" className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-warn-line bg-saffron-soft px-4 py-3 text-saffron-ink">
                 <span className="font-display font-bold">Waiting on you</span>
@@ -81,7 +81,7 @@ export default function FacultyDashboard() {
                 <RowList label="Supporting students">
                   {data.supporting_students.map((s) => (
                     <Row key={s.id}>
-                      <div className="grid min-w-0 flex-1 basis-56 gap-1.5">
+                      <div className="grid grid-cols-1 min-w-0 flex-1 basis-56 gap-1.5">
                         <PersonCell name={s.full_name} src={s.profile_picture_url} code={s.usn} />
                         {s.class ? <div className="pl-12"><ClassPath cls={s.class} /></div> : null}
                       </div>
@@ -102,7 +102,7 @@ export default function FacultyDashboard() {
             </Panel>
           </div>
 
-          <aside aria-label="Requests and meetings" className="grid min-w-0 gap-8">
+          <aside aria-label="Requests and meetings" className="grid grid-cols-1 min-w-0 gap-8">
             <Panel title="Class requests" count={data.pending_class_requests.length || null}>
               {data.pending_class_requests.length ? (
                 <RowList label="Pending class requests">
@@ -128,7 +128,7 @@ export default function FacultyDashboard() {
               {data.pending_permission_requests.length ? (
                 <RowList label="Pending student profile changes">
                   {data.pending_permission_requests.slice(0, 3).map((r) => (
-                    <li key={r.id} className="grid gap-1.5 px-4 py-3.5">
+                    <li key={r.id} className="grid grid-cols-1 gap-1.5 px-4 py-3.5">
                       <p className="m-0 font-semibold">{r.student?.full_name || r.requester_name}</p>
                       <ChangedFields changes={r.requested_changes} />
                     </li>
@@ -145,7 +145,7 @@ export default function FacultyDashboard() {
               {data.recent_meetings.length ? (
                 <RowList label="Recent meetings">
                   {data.recent_meetings.map((m) => (
-                    <li key={m.id} className="grid gap-1 px-4 py-3.5">
+                    <li key={m.id} className="grid grid-cols-1 gap-1 px-4 py-3.5">
                       <div className="flex items-start justify-between gap-3">
                         <p className="m-0 min-w-0 font-semibold">{m.student?.full_name || m.counterpart_name}</p>
                         <StatusPill status={m.status} />

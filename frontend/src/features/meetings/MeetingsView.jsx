@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/app/PageHeader";
 import { EmptyState } from "@/components/app/EmptyState";
-import { ListSkeleton } from "@/components/app/PageLoader";
+import { MeetingCardsSkeleton } from "@/components/app/skeletons";
 import { Notice } from "@/components/app/Notice";
 import { ConfirmDialog, PromptDialog } from "@/components/app/dialogs";
 import { meetingsApi } from "@/lib/endpoints";
@@ -82,7 +82,7 @@ export function MeetingsView({ role }) {
 
         <TabsContent value={tab} className="overflow-hidden rounded-lg border border-line bg-card shadow-sm">
           {query.isPending ? (
-            <ListSkeleton rows={3} className="p-3" />
+            <MeetingCardsSkeleton />
           ) : query.isError ? (
             <div className="p-3">
               <Notice tone="danger" title="Could not load your meetings">

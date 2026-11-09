@@ -55,7 +55,7 @@ export function AddInline({ label, field, placeholder, onSubmit, onCancel, errKe
   }
 
   return (
-    <form onSubmit={submit} noValidate className="grid gap-1.5">
+    <form onSubmit={submit} noValidate className="grid grid-cols-1 gap-1.5">
       <div className="flex flex-wrap items-end gap-2">
         <div className="min-w-[10rem] flex-1">
           <label htmlFor={id} className="mb-1 block text-[0.8125rem] font-semibold text-ink-2">{field}</label>
@@ -233,7 +233,7 @@ export function AcademicTree({ branches }) {
         <Button type="button" variant="outline" size="sm" onClick={() => setOpen(new Set())}>Collapse all</Button>
       </div>
 
-      <ul className="m-0 grid list-none gap-4 p-0">
+      <ul className="m-0 grid grid-cols-1 list-none gap-4 p-0">
         {branches.map((b) => (
           <li key={b.id} className="rounded-lg border bg-card px-4 py-1 shadow-sm">
             <Row

@@ -61,7 +61,7 @@ export default function AdminApprovals() {
         <div className="rounded-lg border bg-card shadow-sm"><EmptyState icon={CircleCheck} title={filter === "PENDING" ? "Nothing waiting for approval" : "No requests yet"}>Profile-change requests will show up here.</EmptyState></div>
       ) : null}
 
-      <ul className="m-0 grid list-none gap-3 p-0">
+      <ul className="m-0 grid grid-cols-1 list-none gap-3 p-0">
         {rows.map((r) => {
           const changes = Object.entries(r.requested_changes || {});
           const pendingBusy = decide.isPending && decide.variables?.id === r.id;
@@ -74,7 +74,7 @@ export default function AdminApprovals() {
                   <StatusPill status={r.status} />
                 </div>
               </div>
-              <dl className="m-0 mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]">
+              <dl className="m-0 mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]">
                 {changes.map(([k, v]) => (
                   <div key={k} className="rounded-md bg-surface-2 px-3 py-2">
                     <dt className="text-[0.8125rem] text-muted-foreground">Change {humanKey(k).toLowerCase()} to</dt>

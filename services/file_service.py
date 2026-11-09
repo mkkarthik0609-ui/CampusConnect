@@ -128,3 +128,17 @@ def save_profile_picture(file_storage, role):
     subfolder = "students" if role == "STUDENT" else "faculty"
     relative_path = os.path.join("profile", subfolder, generated_name).replace("\\", "/")
     return relative_path
+
+
+def delete_chat_attachment(relative_path):
+    """Best-effort removal of a stored chat attachment (``chat/<uuid>.<ext>``) once its message is unsent.
+    Only files directly inside the chat upload directory are ever removed."""
+    if not relative_path:
+        return
+    chat_dir = os.path.realpath(get_settings().chat_upload_dir)
+    full = os.path.realpath(os.path.join(get_settings().upload_root, *str(relative_path).split("/")))
+    if os.path.dirname(full) == chat_dir and os.path.isfile(full):
+        try:
+            os.remove(full)
+        except OSError:  # pragma: no cover - the message is already a tombstone; a leftover file is not fatal
+            pass

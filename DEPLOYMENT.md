@@ -106,7 +106,9 @@ Every variable the backend reads is documented in `.env.example`. The ones that 
 | `TRUST_PROXY` | `1` | Honour `X-Forwarded-*` (real client IP for rate limiting, https scheme). |
 | `TRUST_PROXY_HOPS` | `2` | Proxies appending to `X-Forwarded-For`: Vercel + Render's load balancer. Use `1` if a custom domain points straight at Render and Vercel is not in the path. |
 | `BOOTSTRAP_ADMIN` | `1` | Creates the first admin at start-up from the three variables below (idempotent). |
-| `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | *(typed in the dashboard)* | Never commit these. |
+| `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | *(typed in the dashboard)* | Never commit these. `ADMIN_EMAIL` must equal `PRIMARY_ADMIN_EMAIL`. |
+| `PRIMARY_ADMIN_EMAIL` | `mkkarthik0609@gmail.com` (default) | The owner admin; can never be deactivated or reset by other admins. Other admins are appointed inside the app. |
+| `WEBAUTHN_ALLOWED_ORIGINS` | `https://campus-connect-network.vercel.app,http://localhost:5173,http://localhost:8000` (default) | Comma-separated **browser** origins that may register/use admin passkeys (the Vercel site, not the Render host). The passkey RP id is derived from the request `Origin` only when it is on this list. Add your custom domain here if you use one. |
 | `REMINDER_INTERVAL_MINUTES` | `60` | Meeting-reminder job interval. |
 | `ENABLE_SCHEDULER` | `1` (default) | `0` turns the reminder job off. |
 | `LOGIN_MAX_FAILURES_PER_IDENTIFIER`, `LOGIN_MAX_FAILURES_PER_IP`, `SESSION_IDLE_TIMEOUT_MINUTES`, `CAPTCHA_MAX_PER_IP_PER_HOUR`, `LOGIN_CAPTCHA_AFTER_FAILURES` | defaults 5 / 20 / 60 / 60 / 3 | Optional tuning. |
@@ -127,7 +129,8 @@ single origin, none is needed. The session cookie (`cc_session`) is `HttpOnly`, 
 ### First admin
 
 The first admin is created by `BOOTSTRAP_ADMIN=1` with the `ADMIN_*` variables. There is no public admin
-signup. Further admins are added inside the app (Admin -> Admins). As a fallback run, in the Render **Shell**
+signup. Further admins are added inside the app (Admin -> Admins) by any existing admin; they receive a one-time
+temporary password and can then add a passkey. As a fallback run, in the Render **Shell**
 tab of the service:
 
 ```bash

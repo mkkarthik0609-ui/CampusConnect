@@ -1,22 +1,45 @@
 import { Suspense, useEffect, useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger, SheetClose } from "@/components/ui/sheet";
 import { useAuth } from "@/auth/AuthProvider";
+import { useTheme } from "@/lib/theme";
 import { Brand } from "@/components/app/BrandMark";
 import { NotificationBell } from "@/components/app/NotificationBell";
 import { SidebarContent } from "@/components/app/Sidebar";
+import { AppFooter } from "@/components/app/AppFooter";
+import { OfflineBanner } from "@/components/app/OfflineBanner";
 import { RouteFallback } from "@/components/app/PageLoader";
 
+/** Single-key shortcuts (D = theme, N = notifications). Ignored while typing, with modifiers, or with a dialog open. */
+function useShellShortcuts() {
+  const { toggle } = useTheme();
+  const navigate = useNavigate();
+  useEffect(() => {
+    function onKey(e) {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+      const t = e.target;
+      if (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+      const key = e.key.toLowerCase();
+      if (key === "d") toggle();
+      else if (key === "n") navigate("/notifications");
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggle, navigate]);
+}
+
 /**
- * The signed-in layout: fixed sidebar on desktop (>= 60rem), top bar + slide-out menu below.
+ * The signed-in layout: fixed dark sidebar on desktop (>= 60rem), top bar + slide-out sheet below.
  * Pages render into <Outlet/> inside <main id="main">. Keep pages free of their own page padding/max-width:
- * the shell provides them (max 1120px, fluid gutters).
+ * the shell provides them (max 1120px, fluid gutters). The status-bar footer and offline banner live here too.
  */
 export function AppShell({ children }) {
   const { unread } = useAuth();
   const location = useLocation();
   const [open, setOpen] = useState(false);
+  useShellShortcuts();
 
   useEffect(() => { setOpen(false); }, [location.pathname]);
   useEffect(() => { window.scrollTo(0, 0); }, [location.pathname]);
@@ -31,7 +54,7 @@ export function AppShell({ children }) {
 
       {/* Mobile / tablet top bar */}
       <header className="sticky top-0 z-30 flex h-[60px] items-center justify-between border-b border-nav-line bg-nav pr-2.5 pl-4 text-white lg:hidden">
-        <Brand to="/app" size={30} />
+        <Brand to="/app" size={28} className="text-white hover:text-white" />
         <div className="flex items-center gap-0.5">
           <NotificationBell />
           <Sheet open={open} onOpenChange={setOpen}>
@@ -39,9 +62,9 @@ export function AppShell({ children }) {
               <button
                 type="button"
                 aria-label={unreadTotal ? `Menu, ${unreadTotal} unread` : "Menu"}
-                className="relative inline-flex size-11 items-center justify-center rounded-xl text-white hover:bg-nav-hover"
+                className="relative inline-flex size-11 items-center justify-center rounded-[8px] text-white outline-none transition-colors hover:bg-nav-hover focus-visible:ring-2 focus-visible:ring-white/70"
               >
-                <Menu aria-hidden="true" className="size-6" />
+                <Menu aria-hidden="true" className="size-6" strokeWidth={1.6} />
                 {unreadTotal ? <span aria-hidden="true" className="absolute top-[9px] right-[9px] size-2.5 rounded-full bg-saffron shadow-[0_0_0_2px_var(--nav-bg)]" /> : null}
               </button>
             </SheetTrigger>
@@ -52,8 +75,8 @@ export function AppShell({ children }) {
                 onNavigate={() => setOpen(false)}
                 headerSlot={
                   <SheetClose asChild>
-                    <button type="button" aria-label="Close menu" className="inline-flex size-11 items-center justify-center rounded-xl text-white hover:bg-nav-hover">
-                      <X aria-hidden="true" className="size-[22px]" />
+                    <button type="button" aria-label="Close menu" className="inline-flex size-11 items-center justify-center rounded-[8px] text-white outline-none transition-colors hover:bg-nav-hover focus-visible:ring-2 focus-visible:ring-white/70">
+                      <X aria-hidden="true" className="size-[22px]" strokeWidth={1.6} />
                     </button>
                   </SheetClose>
                 }
@@ -68,13 +91,17 @@ export function AppShell({ children }) {
         <SidebarContent />
       </aside>
 
-      <main id="main" tabIndex={-1} className="min-w-0 px-[clamp(1rem,3.5vw,2.75rem)] pt-5 pb-[4.5rem] lg:pt-8">
-        <div key={sectionKey} className="page-enter mx-auto max-w-[1120px]">
-          <Suspense fallback={<RouteFallback />}>
-            {children ?? <Outlet />}
-          </Suspense>
-        </div>
-      </main>
+      <div className="flex min-h-dvh min-w-0 flex-col">
+        <OfflineBanner />
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-[clamp(1rem,3.5vw,2.75rem)] pt-6 pb-14 lg:pt-10">
+          <div key={sectionKey} className="page-enter mx-auto max-w-[1120px]">
+            <Suspense fallback={<RouteFallback />}>
+              {children ?? <Outlet />}
+            </Suspense>
+          </div>
+        </main>
+        <AppFooter />
+      </div>
     </div>
   );
 }

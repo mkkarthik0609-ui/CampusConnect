@@ -49,7 +49,7 @@ export default function ChangePassword() {
     <>
       <PageHeader title="Change password" description="Choose a password you do not use anywhere else. You stay signed in on this device." />
       <div className="max-w-xl rounded-lg border bg-card p-[clamp(1rem,2vw,1.4rem)] shadow-sm">
-        <form onSubmit={onSubmit} noValidate className="grid gap-4">
+        <form onSubmit={onSubmit} noValidate className="grid grid-cols-1 gap-4">
           {formError ? <Notice tone="danger">{formError}</Notice> : null}
           <FormField label="Current password" error={errors.current_password}>
             <PasswordInput autoComplete="current-password" value={form.current_password} onChange={set("current_password")} />

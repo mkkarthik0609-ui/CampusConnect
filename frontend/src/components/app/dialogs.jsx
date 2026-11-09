@@ -103,7 +103,7 @@ export function PromptDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!busy) onOpenChange(next); }}>
       <DialogContent>
-        <form onSubmit={handleSubmit} noValidate className="grid gap-4">
+        <form onSubmit={handleSubmit} noValidate className="grid grid-cols-1 gap-4">
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
             {description ? <DialogDescription>{description}</DialogDescription> : <DialogDescription className="sr-only">{label}</DialogDescription>}

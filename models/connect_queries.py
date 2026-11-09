@@ -1,7 +1,7 @@
 """Read queries that join everything the chat / meeting / supporting / faculty screens need in one go
 (names, codes, pictures, section ids). Pure SQL; authorization is decided by the services/routers."""
 from models.database import get_db
-from models.queries import CHAT_ACCESSIBLE_SQL
+from models.queries import CHAT_ACCESSIBLE_SQL, list_thread_messages, visible_sql
 
 
 def _like(query):
@@ -68,14 +68,16 @@ def get_meeting_full(meeting_id):
 # ---------- chats ----------
 
 _CHAT_LIST_TAIL = """
-    (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.is_seen = 0
-       AND m.sender_user_id != ?) AS unread_count,
-    lm.message_text AS last_message_text, lm.attachment_original_name AS last_attachment_name,
-    lm.created_at AS last_message_at, lm.sender_user_id AS last_sender_user_id, c.updated_at AS chat_updated_at
+    (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.is_seen = 0 AND m.is_unsent = 0
+       AND m.hidden_by_recipient = 0 AND m.sender_user_id != :v) AS unread_count,
+    lm.id AS last_message_id, lm.message_text AS last_message_text, lm.attachment_original_name AS last_attachment_name,
+    lm.created_at AS last_message_at, lm.sender_user_id AS last_sender_user_id, lm.is_unsent AS last_is_unsent,
+    lm.is_seen AS last_is_seen, lm.delivered_at AS last_delivered_at, c.updated_at AS chat_updated_at,
+    u.id AS other_user_id
 """
 _CHAT_LIST_ORDER = " ORDER BY (lm.id IS NULL), lm.created_at DESC, c.id DESC"
-_LAST_MESSAGE_JOIN = """
-    LEFT JOIN messages lm ON lm.id = (SELECT m2.id FROM messages m2 WHERE m2.chat_id = c.id
+_LAST_MESSAGE_JOIN = f"""
+    LEFT JOIN messages lm ON lm.id = (SELECT m2.id FROM messages m2 WHERE m2.chat_id = c.id AND {visible_sql("m2")}
                                       ORDER BY m2.created_at DESC, m2.id DESC LIMIT 1)
 """
 
@@ -87,8 +89,8 @@ def list_chats_for_student(student_id, viewer_user_id):
                    u.profile_picture_path, {_CHAT_LIST_TAIL}
             FROM chats c JOIN faculty f ON f.id = c.faculty_id JOIN users u ON u.id = f.user_id
             {_LAST_MESSAGE_JOIN}
-            WHERE c.student_id = ? AND {CHAT_ACCESSIBLE_SQL}{_CHAT_LIST_ORDER}""",
-        (viewer_user_id, student_id),
+            WHERE c.student_id = :owner AND {CHAT_ACCESSIBLE_SQL}{_CHAT_LIST_ORDER}""",
+        {"v": viewer_user_id, "owner": student_id},
     ).fetchall()
 
 
@@ -98,16 +100,14 @@ def list_chats_for_faculty(faculty_id, viewer_user_id):
                    u.profile_picture_path, {_CHAT_LIST_TAIL}
             FROM chats c JOIN students s ON s.id = c.student_id JOIN users u ON u.id = s.user_id
             {_LAST_MESSAGE_JOIN}
-            WHERE c.faculty_id = ? AND {CHAT_ACCESSIBLE_SQL}{_CHAT_LIST_ORDER}""",
-        (viewer_user_id, faculty_id),
+            WHERE c.faculty_id = :owner AND {CHAT_ACCESSIBLE_SQL}{_CHAT_LIST_ORDER}""",
+        {"v": viewer_user_id, "owner": faculty_id},
     ).fetchall()
 
 
-def list_messages(chat_id, after_id=0):
-    return get_db().execute(
-        "SELECT * FROM messages WHERE chat_id = ? AND id > ? ORDER BY created_at ASC, id ASC",
-        (chat_id, after_id or 0),
-    ).fetchall()
+def list_messages(chat_id, after_id=0, since=None, viewer_user_id=None):
+    """Messages of a chat newer than ``after_id`` plus those changed since ``since`` (see queries.list_thread_messages)."""
+    return list_thread_messages("messages", "m.chat_id = :chat", {"chat": chat_id}, viewer_user_id, after_id, since)
 
 
 # ---------- supporting relationships ----------

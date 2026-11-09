@@ -8,3 +8,5 @@ APScheduler==3.10.4
 # Werkzeug is used standalone: password hashing + secure_filename.
 Werkzeug==3.0.4
 Pillow==12.3.0
+# Admin passkeys (WebAuthn). Pulls in cryptography + cbor2.
+webauthn==3.0.1

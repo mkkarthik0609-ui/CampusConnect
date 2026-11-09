@@ -32,9 +32,19 @@ export const authApi = {
     return data;
   },
 
-  /** POST /api/auth/admin-login { identifier, password } -> admin session */
+  /** POST /api/auth/admin-login { identifier, password } -> admin session (email + password, always verified) */
   async adminLogin({ identifier, password }) {
     const data = await api.post("/api/auth/admin-login", { identifier, password }, { skipAuthRedirect: true });
+    setCsrfToken(data?.csrf_token);
+    return data;
+  },
+
+  /** POST /api/auth/admin-passkey/options -> { options } WebAuthn assertion options (discoverable credentials) */
+  adminPasskeyOptions: () => api.post("/api/auth/admin-passkey/options", {}, { skipAuthRedirect: true }),
+
+  /** POST /api/auth/admin-passkey/verify { credential, identifier? } -> same response as admin-login */
+  async adminPasskeyLogin({ credential, identifier }) {
+    const data = await api.post("/api/auth/admin-passkey/verify", { credential, identifier: identifier || "" }, { skipAuthRedirect: true });
     setCsrfToken(data?.csrf_token);
     return data;
   },
@@ -132,20 +142,29 @@ export const studentApi = {
 };
 
 // ---- chat (api/routers/chat.py, docs/api/chat.md) -------------------------------------------
+// Message shape: { id, is_mine, message_text, attachment, status: sent|delivered|seen, is_edited, is_unsent,
+// can_edit, can_unsend, reply_to, created_at, ... }. Polling: pass `afterId` + `since` from the previous response
+// (`last_id`, `server_time`) and merge what comes back by id (new messages AND changed older ones).
 export const chatApi = {
-  /** GET /api/chat -> { items: [{ chat_id, other, unread_count, last_message, last_message_at, last_message_is_mine }], total, total_unread } */
+  /** GET /api/chat -> { items: [{ chat_id, other (+online, last_active_at, typing), unread_count, last_message, last_message_at, last_message_is_mine, last_message_is_unsent, last_message_status }], total, total_unread }. Marks incoming messages delivered. */
   list: () => api.get("/api/chat"),
   /** POST /api/chat/open { faculty_id } (student) | { student_id } (faculty) -> { ok, chat_id } */
   open: (body) => api.post("/api/chat/open", body),
-  /** GET /api/chat/:id?after_id= -> { chat: { id, other }, messages[], last_id }. Marks incoming messages as seen. */
-  get: (id, afterId = 0) => api.get(`/api/chat/${id}`, { params: { after_id: afterId || undefined } }),
-  /** POST /api/chat/:id/messages  JSON { message_text } or multipart { attachment, message_text? } -> 201 { ok, item } */
-  send: (id, { text, file } = {}) =>
+  /** GET /api/chat/:id?after_id=&updated_since= -> { chat: { id, other }, messages[], last_id, server_time }. Marks incoming messages as seen. */
+  get: (id, { afterId = 0, since } = {}) => api.get(`/api/chat/${id}`, { params: { after_id: afterId || undefined, updated_since: since } }),
+  /** POST /api/chat/:id/messages  JSON { message_text, reply_to_id? } or multipart { attachment, message_text?, reply_to_id? } -> 201 { ok, item } */
+  send: (id, { text, file, replyToId } = {}) =>
     file
-      ? api.upload(`/api/chat/${id}/messages`, toFormData({ attachment: file, message_text: text || undefined }))
-      : api.post(`/api/chat/${id}/messages`, { message_text: text }),
-  /** POST /api/chat/messages/:id/edit { message_text } -> { ok, item } (409 once the other side has seen it) */
+      ? api.upload(`/api/chat/${id}/messages`, toFormData({ attachment: file, message_text: text || undefined, reply_to_id: replyToId || undefined }))
+      : api.post(`/api/chat/${id}/messages`, { message_text: text, ...(replyToId ? { reply_to_id: replyToId } : {}) }),
+  /** POST /api/chat/messages/:id/edit { message_text } -> { ok, item } (409 after the 15-minute edit window) */
   edit: (messageId, text) => api.post(`/api/chat/messages/${messageId}/edit`, { message_text: text }),
+  /** POST /api/chat/messages/:id/unsend -> { ok, item } (sender only, any time; idempotent) */
+  unsend: (messageId) => api.post(`/api/chat/messages/${messageId}/unsend`, {}),
+  /** POST /api/chat/messages/:id/delete-for-me -> { ok, id } (hides it for me only; idempotent) */
+  hide: (messageId) => api.post(`/api/chat/messages/${messageId}/delete-for-me`, {}),
+  /** POST /api/chat/:id/typing -> { ok } ("I am typing", valid ~5 s) */
+  typing: (id) => api.post(`/api/chat/${id}/typing`, {}),
 };
 
 // ---- meetings (api/routers/meetings.py, docs/api/meetings.md) -------------------------------
@@ -175,10 +194,19 @@ export const supportingApi = {
   reject: (relId) => api.post(`/api/supporting/${relId}/reject`, {}),
 };
 
+/** Faculty <-> admin messages (api/routers/admin_messages.py). Same contract as chatApi; the conversation id is the faculty member's USER id. */
 export const adminMessagesApi = {
+  /** GET /api/admin-messages -> { items: [{ conversation_id, other, unread_count, last_message, last_message_at, last_message_is_mine, last_message_is_unsent, last_message_status }], total, total_unread } */
   list: () => api.get("/api/admin-messages"),
-  thread: (facultyUserId) => api.get(`/api/admin-messages/${facultyUserId}`),
+  /** GET /api/admin-messages/:facultyUserId?after_id=&updated_since= -> { chat: { id, other }, messages[], last_id, server_time } */
+  thread: (facultyUserId, { afterId = 0, since } = {}) =>
+    api.get(`/api/admin-messages/${facultyUserId}`, { params: { after_id: afterId || undefined, updated_since: since } }),
+  /** POST /api/admin-messages { message_text, recipient_user_id? (admin), reply_to_id? } -> 201 { ok, id, item } */
   send: (body) => api.post("/api/admin-messages", body),
+  edit: (messageId, text) => api.post(`/api/admin-messages/messages/${messageId}/edit`, { message_text: text }),
+  unsend: (messageId) => api.post(`/api/admin-messages/messages/${messageId}/unsend`, {}),
+  hide: (messageId) => api.post(`/api/admin-messages/messages/${messageId}/delete-for-me`, {}),
+  typing: (facultyUserId) => api.post(`/api/admin-messages/${facultyUserId}/typing`, {}),
 };
 
 // ---- admin console + research (implemented in lib/adminApi.js) ----

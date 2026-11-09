@@ -32,7 +32,7 @@ logger = logging.getLogger("campusconnect.api")
 # Registered in this order. Modules that do not exist yet are skipped (see _register_routers).
 ROUTER_MODULES = [
     "system", "auth", "account", "academic", "notifications", "uploads",
-    "admin", "admin_academic", "admin_messages", "faculty", "student", "chat", "meetings", "supporting", "research",
+    "admin", "admin_academic", "admin_passkeys", "admin_messages", "faculty", "student", "chat", "meetings", "supporting", "research",
 ]
 
 

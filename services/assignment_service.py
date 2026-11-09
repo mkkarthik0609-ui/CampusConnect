@@ -3,7 +3,7 @@ activate an assignment; a faculty request grants nothing until Admin approves it
 from models import queries
 from models import academic_queries as aq
 from services import notification_service as notif
-from services.academic_service import AcademicError, resolve_section, combo_label
+from services.academic_service import AcademicError, resolve_class, resolve_section, combo_label
 
 
 class AssignmentError(Exception):
@@ -50,9 +50,9 @@ def admin_remove(assignment_id, admin_user_id):
     return combo
 
 
-def faculty_request(faculty_id, section_id, note=None):
+def faculty_request(faculty_id, section_id, note=None, custom_class=None):
     try:
-        combo = resolve_section(section_id)
+        combo = resolve_class(section_id, custom_class)
     except AcademicError as e:
         raise AssignmentError(str(e))
     if aq.is_faculty_assigned_to_section(faculty_id, combo["section_id"]):

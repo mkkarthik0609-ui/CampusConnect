@@ -10,10 +10,10 @@ import { Notice } from "@/components/app/Notice";
 import { CaptchaField } from "@/components/app/CaptchaField";
 import { useAuth } from "@/auth/AuthProvider";
 import { ApiError } from "@/lib/api";
-import { usePageTitle } from "@/hooks/usePageTitle";
+import { useMeta } from "@/hooks/useMeta";
 
 export default function Login() {
-  usePageTitle("Sign in");
+  useMeta({ title: "Sign in", description: "Sign in to CampusConnect with your email, Faculty ID or USN." });
   const { login } = useAuth();
   const location = useLocation();
   const [params] = useSearchParams();
@@ -68,7 +68,7 @@ export default function Login() {
         </>
       }
     >
-      <form onSubmit={onSubmit} noValidate className="grid gap-4">
+      <form onSubmit={onSubmit} noValidate className="grid gap-6">
         {justRegistered ? <Notice tone="success">Your account is ready. Sign in to get started.</Notice> : null}
         {needsSignIn && !justRegistered ? <Notice tone="info">Sign in to continue where you left off.</Notice> : null}
         {error?.message && !Object.keys(error.fields || {}).length ? (
@@ -91,7 +91,7 @@ export default function Login() {
         {needsCaptcha ? (
           <CaptchaField label="Security check" resetKey={captchaKey} onChange={setCaptcha} error={error?.fields?.captcha} />
         ) : null}
-        <SubmitButton className="mt-1 w-full" loading={busy} loadingText="Signing in">Sign in</SubmitButton>
+        <SubmitButton className="w-full" loading={busy} loadingText="Signing in">Sign in</SubmitButton>
       </form>
     </AuthCard>
   );

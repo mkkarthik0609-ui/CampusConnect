@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader, SectionHeading } from "@/components/app/PageHeader";
 import { ClassPath } from "@/components/app/ClassPath";
 import { EmptyState } from "@/components/app/EmptyState";
-import { ListSkeleton } from "@/components/app/PageLoader";
+import { CardListSkeleton, StatTilesSkeleton } from "@/components/app/skeletons";
 import { Notice } from "@/components/app/Notice";
 import { StatTile } from "@/components/app/StatTile";
 import { StatusPill } from "@/components/app/StatusPill";
@@ -35,7 +35,13 @@ export default function StudentDashboard() {
       />
 
       {query.isPending ? (
-        <ListSkeleton rows={5} />
+        <div className="grid grid-cols-1 gap-6">
+          <StatTilesSkeleton />
+          <div className="grid grid-cols-1 items-start gap-6 min-[64rem]:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+            <CardListSkeleton rows={3} />
+            <CardListSkeleton rows={2} />
+          </div>
+        </div>
       ) : query.isError ? (
         <Notice tone="danger" title="Could not load your dashboard">
           {query.error.message}
@@ -53,7 +59,7 @@ function DashboardBody({ d }) {
   const { assigned_faculty: assigned, supporting_faculty: supporting, pending_supporting_requests: requests, recent_meetings: meetings, counts } = d;
 
   return (
-    <div className="grid gap-6">
+    <div className="grid grid-cols-1 gap-6">
       <div className="grid grid-cols-2 gap-3 min-[44rem]:grid-cols-4">
         <StatTile label="Meetings awaiting a reply" value={counts.meetings_pending} to="/student/meetings?status=pending" alert={counts.meetings_pending > 0} />
         <StatTile label="Accepted meetings" value={counts.meetings_accepted} to="/student/meetings?status=accepted" />
@@ -63,8 +69,8 @@ function DashboardBody({ d }) {
 
       {requests.length ? <SupportingRequests items={requests} /> : null}
 
-      <div className="grid items-start gap-6 min-[64rem]:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-        <div className="grid gap-6">
+      <div className="grid grid-cols-1 items-start gap-6 min-[64rem]:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+        <div className="grid grid-cols-1 gap-6">
           <section aria-label="Faculty for your class">
             <SectionHeading title="Faculty for your class" as="h2" />
             <div className={panel}>
@@ -100,7 +106,7 @@ function DashboardBody({ d }) {
               {meetings.length ? (
                 <ul className="m-0 list-none p-0">
                   {meetings.map((m) => (
-                    <li key={m.id} className="grid gap-1 border-t border-line px-4 py-3.5 first:border-t-0">
+                    <li key={m.id} className="grid grid-cols-1 gap-1 border-t border-line px-4 py-3.5 first:border-t-0">
                       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                         <p className="m-0 min-w-0 font-[650]">{m.reason}</p>
                         <StatusPill status={m.status} />

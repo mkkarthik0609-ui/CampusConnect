@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { adminApi, adminKeys } from "@/lib/endpoints";
 import { queryKeys } from "@/lib/queryClient";
 import { AcademicTree, AddInline } from "@/features/admin/AcademicTree";
-import { ListSkeletonRows, QueryError } from "@/features/admin/common";
+import { QueryError } from "@/features/admin/common";
+import { ClassTreeSkeleton } from "@/components/app/skeletons";
 import { Layers } from "lucide-react";
 
 export default function AdminAcademics() {
@@ -45,7 +46,7 @@ export default function AdminAcademics() {
         Deactivating hides a level and everything below it, and keeps all history. Delete is only offered for items with no students and no faculty assignments.
       </Notice>
 
-      {q.isPending ? <ListSkeletonRows rows={3} /> : null}
+      {q.isPending ? <ClassTreeSkeleton /> : null}
       {q.isError ? <QueryError error={q.error} onRetry={q.refetch} /> : null}
       {q.data && !branches.length ? (
         <div className="rounded-lg border bg-card shadow-sm">

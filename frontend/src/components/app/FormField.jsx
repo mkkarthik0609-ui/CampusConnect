@@ -38,14 +38,14 @@ export function FormField({ label, hint, error, required, children, className, l
   return (
     <div className={cn("min-w-0", className)}>
       {label ? (
-        <Label htmlFor={id} className={cn("mb-1.5 text-sm font-semibold text-ink-2", labelClassName)}>
+        <Label htmlFor={id} className={cn("mb-2 text-sm font-medium text-ink-2", labelClassName)}>
           {label}
-          {required ? <span aria-hidden="true" className="ml-0.5 text-danger-ink">*</span> : null}
+          {required ? <span aria-hidden="true" className="ml-0.5 text-muted-foreground">*</span> : null}
         </Label>
       ) : null}
       {control}
-      {hint ? <p id={hintId} className="mt-1.5 text-[0.8125rem] text-muted-foreground">{hint}</p> : null}
-      {error ? <p id={errorId} role="alert" className="mt-1.5 text-[0.8125rem] font-semibold text-danger-ink">{error}</p> : null}
+      {hint ? <p id={hintId} className="mt-2 text-[0.8125rem] text-muted-foreground">{hint}</p> : null}
+      {error ? <p id={errorId} role="alert" className="mt-2 text-[0.8125rem] font-medium text-danger-ink">{error}</p> : null}
     </div>
   );
 }

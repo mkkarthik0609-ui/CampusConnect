@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { UserAvatar } from "@/components/app/UserAvatar";
 import { StatusPill } from "@/components/app/StatusPill";
 import { Notice } from "@/components/app/Notice";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CardListSkeleton } from "@/components/app/skeletons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +15,7 @@ export function PersonCell({ name, src, sub, mono = false, size = "sm", classNam
     <div className={cn("flex min-w-0 items-center gap-2.5 max-sm:justify-end", className)}>
       <UserAvatar name={name} src={src} size={size} />
       <div className="min-w-0 text-left">
-        <div className="truncate font-semibold text-foreground">{name}</div>
+        <div className="break-words font-semibold text-foreground">{name}</div>
         {sub ? <div className={cn("truncate text-[0.8125rem] text-muted-foreground", mono && "font-mono")}>{sub}</div> : null}
       </div>
     </div>
@@ -69,12 +69,7 @@ export function ActivePill({ active, onLabel = "Active", offLabel = "Inactive" }
 
 /** Skeleton rows for non-table lists. */
 export function ListSkeletonRows({ rows = 4, className }) {
-  return (
-    <div className={cn("grid gap-3", className)} role="status" aria-busy="true">
-      <span className="sr-only">Loading</span>
-      {Array.from({ length: rows }, (_, i) => <Skeleton key={i} className="h-16 w-full" />)}
-    </div>
-  );
+  return <CardListSkeleton rows={rows} className={className} />;
 }
 
 export function QueryError({ error, onRetry, title = "Could not load this page" }) {

@@ -46,7 +46,7 @@ export default function AdminMeetings() {
           { key: "student", header: "Student", primary: true, cell: (m) => (
             <div className="grid min-w-0 gap-1 max-sm:justify-items-start">
               <PersonCell name={m.student.full_name} src={m.student.profile_picture_url} sub={m.student.usn} mono />
-              {m.student.class ? <ClassPath cls={m.student.class} /> : null}
+              {m.student.class ? <ClassPath cls={m.student.class} className="sm:flex-nowrap sm:whitespace-nowrap" /> : null}
             </div>
           ) },
           { key: "faculty", header: "Faculty", cell: (m) => <PersonCell name={m.faculty.full_name} src={m.faculty.profile_picture_url} sub={m.faculty.faculty_code} mono /> },

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PageHeader, SectionHeading } from "@/components/app/PageHeader";
 import { Notice } from "@/components/app/Notice";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SkeletonRegion } from "@/components/app/skeletons";
 import { researchApi, adminKeys } from "@/lib/endpoints";
 import { QueryError } from "@/features/admin/common";
 import { ComparisonTable } from "@/features/admin/research/ComparisonTable";
@@ -79,7 +80,7 @@ export default function AdminResearch() {
       </section>
 
       {q.isPending ? (
-        <div className="grid gap-4" role="status" aria-busy="true"><span className="sr-only">Loading results</span><Skeleton className="h-24" /><Skeleton className="h-80" /></div>
+        <SkeletonRegion label="Loading results" className="grid grid-cols-1 gap-4"><Skeleton className="h-24" /><Skeleton className="h-80" /></SkeletonRegion>
       ) : null}
       {q.isError ? <QueryError error={q.error} onRetry={q.refetch} title="Could not load the results" /> : null}
 
@@ -94,7 +95,7 @@ export default function AdminResearch() {
           <section aria-label="Results" className="mb-10">
             <SectionHeading title="The result" as="h2" actions={<LoadTabs value={load} onChange={setLoad} levels={data.levels} />} />
             {sum ? (
-              <div className="mb-5 grid max-w-[72ch] gap-1.5 text-[1.0625rem] leading-relaxed">
+              <div className="mb-5 grid grid-cols-1 max-w-[72ch] gap-1.5 text-[1.0625rem] leading-relaxed">
                 <p className="m-0">{sum.vsFcfs}</p>
                 <p className="m-0 text-ink-2">{sum.vsRule}</p>
               </div>
@@ -111,7 +112,7 @@ export default function AdminResearch() {
             {level?.conclusions?.length ? (
               <details className="mt-4 rounded-lg border bg-card">
                 <summary className="cursor-pointer rounded-lg px-4 py-3 text-sm font-semibold text-primary hover:bg-primary-soft">Study conclusions for {load} load</summary>
-                <ul className="m-0 grid gap-2 px-8 pb-4 text-sm">{level.conclusions.map((c) => <li key={c}>{c}</li>)}</ul>
+                <ul className="m-0 grid grid-cols-1 gap-2 px-8 pb-4 text-sm">{level.conclusions.map((c) => <li key={c}>{c}</li>)}</ul>
               </details>
             ) : null}
           </section>

@@ -105,6 +105,62 @@ def touch_last_login(user_id):
     db.commit()
 
 
+def set_user_active(user_id, active):
+    db = get_db()
+    db.execute("UPDATE users SET is_active = ?, updated_at = datetime('now') WHERE id = ?", (1 if active else 0, user_id))
+    db.commit()
+
+
+# ---------- admin passkeys (WebAuthn credentials; credential_id is base64url text) ----------
+
+def create_passkey(user_id, credential_id, public_key, sign_count, transports, label):
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO admin_passkeys (user_id, credential_id, public_key, sign_count, transports, label) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, credential_id, public_key, sign_count, transports, label),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def get_passkey_by_credential_id(credential_id):
+    return get_db().execute("SELECT * FROM admin_passkeys WHERE credential_id = ?", (credential_id,)).fetchone()
+
+
+def list_passkeys(user_id):
+    return get_db().execute(
+        "SELECT id, credential_id, transports, label, created_at, last_used_at FROM admin_passkeys "
+        "WHERE user_id = ? ORDER BY id", (user_id,),
+    ).fetchall()
+
+
+def count_passkeys(user_id):
+    return get_db().execute("SELECT COUNT(*) AS c FROM admin_passkeys WHERE user_id = ?", (user_id,)).fetchone()["c"]
+
+
+def touch_passkey(passkey_id, sign_count):
+    db = get_db()
+    db.execute("UPDATE admin_passkeys SET sign_count = ?, last_used_at = ? WHERE id = ?",
+               (sign_count, fmt(utcnow()), passkey_id))
+    db.commit()
+
+
+def delete_passkey(passkey_id, user_id):
+    """Delete one passkey owned by `user_id`; returns True if a row was removed."""
+    db = get_db()
+    deleted = db.execute("DELETE FROM admin_passkeys WHERE id = ? AND user_id = ?", (passkey_id, user_id)).rowcount
+    db.commit()
+    return deleted == 1
+
+
+def delete_passkeys_for_user(user_id):
+    db = get_db()
+    deleted = db.execute("DELETE FROM admin_passkeys WHERE user_id = ?", (user_id,)).rowcount
+    db.commit()
+    return deleted
+
+
 # ---------- captcha challenges ----------
 
 def count_recent_captchas_for_ip(ip, window_minutes=60):

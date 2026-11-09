@@ -1,3 +1,6 @@
+import { handleChatMock } from "./mockChat";
+import { handleDataMock, NODATA } from "./mockData";
+
 /**
  * DEV-ONLY in-memory API used when the Flask/FastAPI backend is unavailable:  `npm run dev:mock`
  * (sets VITE_MOCK=1). main.jsx imports this behind `import.meta.env.DEV`, so it is tree-shaken from
@@ -42,7 +45,7 @@ const session = () => ({
   user: current,
   csrf_token: csrf,
   unread_notifications: current ? notifications.filter((n) => !n.is_read).length : 0,
-  unread_messages: current ? 2 : 0,
+  unread_messages: current ? 2 : 0, // chat unread counts come from the list endpoints
 });
 
 export function installMock() {
@@ -109,6 +112,12 @@ export function installMock() {
     if (path === "/api/notifications/read-all") { notifications = notifications.map((n) => ({ ...n, is_read: true })); return json(200, { ok: true, unread_count: 0 }); }
     const m = path.match(/^\/api\/notifications\/(\d+)\/read$/);
     if (m) { notifications = notifications.map((n) => (n.id === Number(m[1]) ? { ...n, is_read: true } : n)); return json(200, { ok: true, unread_count: notifications.filter((n) => !n.is_read).length }); }
+
+    const chatResponse = handleChatMock({ method, path, url, body, user: current, json, err });
+    if (chatResponse) return chatResponse;
+
+    const dataResponse = handleDataMock({ method, path, url, body, user: current, json, err });
+    if (dataResponse !== NODATA) return dataResponse;
 
     return err(404, "not_found", `Mock has no endpoint for ${method} ${path}.`);
   };

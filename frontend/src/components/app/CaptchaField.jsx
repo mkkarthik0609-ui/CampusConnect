@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { FormField } from "@/components/app/FormField";
 import { authApi } from "@/lib/endpoints";
 import { errorMessage } from "@/lib/api";
@@ -56,11 +57,11 @@ export function CaptchaField({ resetKey = 0, onChange, error, label = "Security 
       {({ id, describedBy, invalid }) => (
         <div className="grid gap-2">
           <div className="flex items-center gap-2">
-            <div className="flex h-[84px] w-[240px] max-w-full items-center justify-center overflow-hidden rounded-md border bg-white">
+            <div className="flex h-[84px] w-[240px] max-w-full items-center justify-center overflow-hidden rounded-lg border border-line-strong bg-white">
               {challenge ? (
                 <img src={challenge.image} width={240} height={84} alt="Captcha: distorted letters and numbers to type below" className="h-full w-full select-none" draggable={false} />
               ) : (
-                <span className="text-sm text-muted-foreground">{loading ? "Loading captcha" : "Unavailable"}</span>
+                loading ? <Skeleton className="size-full rounded-none"><span className="sr-only">Loading captcha</span></Skeleton> : <span className="text-sm text-muted-foreground">Unavailable</span>
               )}
             </div>
             <Button type="button" variant="outline" size="icon" onClick={load} disabled={loading} aria-label="Show a different captcha">

@@ -13,10 +13,12 @@ import { safeNext } from "@/lib/format";
 import { PageLoader } from "@/components/app/PageLoader";
 import { ServerErrorPage } from "@/pages/shared/ServerError";
 import { Forbidden } from "@/pages/shared/Forbidden";
+import Offline from "@/pages/shared/Offline";
 
 function Gate({ children }) {
   const { status, retry } = useAuth();
   if (status === "loading") return <PageLoader label="Checking your session" />;
+  if (status === "error" && navigator.onLine === false) return <Offline standalone onRetry={retry} />;
   if (status === "error") return <ServerErrorPage standalone onRetry={retry} title="We can't reach Campus Connect" message="The server did not answer. Check your connection and try again." />;
   return children;
 }

@@ -94,6 +94,10 @@ _CHAT_SELECT = """
            (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id) AS message_count,
            (SELECT m.message_text FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC
               LIMIT 1) AS last_message,
+           (SELECT m.is_unsent FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC
+              LIMIT 1) AS last_is_unsent,
+           (SELECT m.sender_user_id FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC
+              LIMIT 1) AS last_sender_user_id,
            (SELECT m.created_at FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC
               LIMIT 1) AS last_message_at
     FROM chats c
@@ -110,9 +114,16 @@ def get_chat(chat_id):
     return get_db().execute(_CHAT_SELECT + " WHERE c.id = ?", (chat_id,)).fetchone()
 
 
-def list_messages(chat_id):
+def count_messages(chat_id):
+    return get_db().execute("SELECT COUNT(*) AS n FROM messages WHERE chat_id = ?", (chat_id,)).fetchone()["n"]
+
+
+def list_messages(chat_id, after_id=0, since=None):
+    """Every message of the chat (the admin viewer ignores 'delete for me'); with ``after_id`` / ``since`` only
+    the new and the changed ones."""
     return get_db().execute(
-        "SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at ASC, id ASC", (chat_id,)
+        "SELECT * FROM messages WHERE chat_id = ? AND (id > ? OR updated_at >= ?) ORDER BY created_at ASC, id ASC",
+        (chat_id, after_id or 0, since),
     ).fetchall()
 
 

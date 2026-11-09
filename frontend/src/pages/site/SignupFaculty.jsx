@@ -12,13 +12,13 @@ import { CaptchaField } from "@/components/app/CaptchaField";
 import { authApi } from "@/lib/endpoints";
 import { ApiError, errorMessage } from "@/lib/api";
 import { useFacultyDepartments } from "@/hooks/useFacultyDepartments";
-import { usePageTitle } from "@/hooks/usePageTitle";
+import { useMeta } from "@/hooks/useMeta";
 
 const PASSWORD_RULE = "At least 8 characters with an uppercase letter, a lowercase letter and a digit.";
 
 /** /signup/faculty -> POST /api/auth/signup/faculty. Classes are assigned by Admin after registration. */
 export default function SignupFaculty() {
-  usePageTitle("Faculty registration");
+  useMeta({ title: "Faculty registration", description: "Register as CampusConnect faculty with your Faculty ID. Admin assigns your classes after you sign up." });
   const navigate = useNavigate();
   const departments = useFacultyDepartments();
   const [form, setForm] = useState({ full_name: "", faculty_code: "", department: "", professional_email: "", subjects: "", password: "", confirm_password: "" });
@@ -76,9 +76,9 @@ export default function SignupFaculty() {
       lead="Create your account with your Faculty ID. Admin assigns your classes once you have registered."
       footer={<span>Already have an account? <Link to="/login">Sign in</Link></span>}
     >
-      <form onSubmit={onSubmit} noValidate className="grid gap-5">
+      <form onSubmit={onSubmit} noValidate className="grid gap-8">
         {formError ? <Notice tone="danger">{formError}</Notice> : null}
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-6 @lg:grid-cols-2">
           <FormField label="Full name" required error={errors.full_name}>
             <Input autoComplete="name" value={form.full_name} onChange={set("full_name")} />
           </FormField>
@@ -108,9 +108,9 @@ export default function SignupFaculty() {
           Classes and sections are assigned by Admin. After you sign in you can request additional classes from the My Classes page.
         </Notice>
 
-        <section aria-labelledby="pw-h" className="border-t pt-5">
-          <h2 id="pw-h" className="mb-4 text-xl">Password</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
+        <section aria-labelledby="pw-h" className="border-t pt-8">
+          <h2 id="pw-h" className="mb-5 text-2xl font-light">Password</h2>
+          <div className="grid gap-6 @lg:grid-cols-2">
             <FormField label="Campus Connect password" required hint={PASSWORD_RULE} error={errors.password}>
               <PasswordInput autoComplete="new-password" minLength={8} value={form.password} onChange={set("password")} />
             </FormField>
@@ -120,7 +120,7 @@ export default function SignupFaculty() {
           </div>
         </section>
 
-        <section className="border-t pt-5">
+        <section className="border-t pt-8">
           <CaptchaField resetKey={captchaKey} onChange={setCaptcha} error={errors.captcha} />
         </section>
 

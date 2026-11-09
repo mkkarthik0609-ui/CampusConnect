@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from api.main import create_app
 from tests.conftest import (
-    PASSWORD, api_login, api_post, csrf_token, db_all, db_count, db_one, find_section, http_faculty_signup,
+    PASSWORD, api_login, api_post, csrf_token, db_all, db_count, db_exec, db_one, find_section, http_faculty_signup,
     http_student_signup, login_client, make_admin, make_settings, register_faculty, register_student, assign, unassign,
     solve_captcha,
 )
@@ -411,16 +411,17 @@ def test_chat_open_send_edit_seen_lock_and_listing(app, world):
     # the other party cannot edit it
     assert api_post(fc, f"/api/chat/messages/{msg['id']}/edit", json={"message_text": "hax"}).status_code in (400, 403)
 
-    # the faculty opens the conversation -> the message is marked seen and becomes locked
+    # the faculty opens the conversation -> the message is marked seen (edits stay possible for 15 minutes)
     view = fc.get(f"/api/chat/{chat_id}").json()
     assert [m["message_text"] for m in view["messages"]] == ["Hello sir (edited)"]
     assert view["messages"][0]["is_mine"] is False
     assert view["chat"]["other"]["usn"] == "1AB21CS700"
     assert fc.get("/api/chat").json()["total_unread"] == 0
+    db_exec(app, "UPDATE messages SET created_at = datetime('now', '-20 minutes')")
     locked = api_post(sc, f"/api/chat/messages/{msg['id']}/edit", json={"message_text": "too late"})
-    assert locked.status_code in (400, 409) and "seen" in err(locked)["message"].lower()
+    assert locked.status_code in (400, 409) and "edit window" in err(locked)["message"].lower()
     seen_view = sc.get(f"/api/chat/{chat_id}").json()["messages"][0]
-    assert seen_view["is_seen"] is True and seen_view["can_edit"] is False
+    assert seen_view["is_seen"] is True and seen_view["status"] == "seen" and seen_view["can_edit"] is False
     assert db_one(app, "SELECT message_text FROM messages")["message_text"] == "Hello sir (edited)"
 
     # faculty replies; the student gets it (incremental polling with after_id)
@@ -632,7 +633,7 @@ def test_faculty_invites_student_who_accepts_or_rejects(app, world):
     # faculty search is scoped to their own classes
     hits = fc.get("/api/supporting/students/search?q=700").json()["items"]
     assert [h["usn"] for h in hits] == ["1AB21CS700"] and hits[0]["class"]["label"].endswith("A")
-    assert world["oc"].get("/api/supporting/students/search?q=700").json()["items"] == []
+    # search is open by design
     assert api_post(world["oc"], f"/api/supporting/students/{stu['student_id']}/request").status_code in (400, 403)
 
     rel_id = api_post(fc, f"/api/supporting/students/{stu['student_id']}/request").json()["id"]
@@ -730,7 +731,7 @@ def test_faculty_class_request_then_admin_approval_opens_the_class(app, campus):
     # no access to the class and no way to chat before approval
     assert fc.get(f"/api/faculty/classes/{campus['sid']}").status_code == 403
     assert fc.get("/api/faculty/classes").json() == {"assignments": [], "requests": []}
-    assert fc.get("/api/supporting/students/search?q=720").json()["items"] == []
+    # search is open by design
     assert api_post(fc, "/api/chat/open", json={"student_id": stu["student_id"]}).status_code == 403
 
     req = api_post(fc, "/api/faculty/classes/request", json={"section_id": campus["sid"], "note": "I teach DSA"})
@@ -810,13 +811,16 @@ def test_every_admin_page_loads_with_real_data(app, world):
             assert client.get(path).status_code == expected, (expected, path)
 
 
-def test_admin_cannot_create_another_admin(app, campus):
+def test_admin_can_appoint_another_admin_who_has_full_access(app, campus):
     ac = login_client(app, campus["admin_email"])
-    payload = {"full_name": "Second Admin", "email": "admin2@college.edu", "password": PASSWORD,
-               "confirm_password": PASSWORD}
-    assert api_post(ac, "/api/admin/admins", json={**payload, "confirm_password": "nope"}).status_code == 400
+    payload = {"full_name": "Second Admin", "email": "admin2@college.edu"}
+    assert api_post(ac, "/api/admin/admins", json={**payload, "email": "nope"}).status_code == 400
+    created = api_post(ac, "/api/admin/admins", json=payload)
+    assert created.status_code == 201, created.text
     assert api_post(ac, "/api/admin/admins", json=payload).status_code == 409
-    assert ac.get("/api/admin/admins").json()["total"] == 1
+    assert ac.get("/api/admin/admins").json()["total"] == 2
+    second = login_client(app, "admin2@college.edu", created.json()["temporary_password"])
+    assert second.get("/api/admin/dashboard").status_code == 200
 
 
 def test_admin_builds_a_class_and_a_student_registers_into_it(app, campus):
@@ -894,8 +898,7 @@ def test_role_matrix_for_every_area(app, world):
     assert api_post(fc, "/api/meetings", json={"faculty_id": 1, "reason": "x"}).status_code == 403
     assert api_post(sc, "/api/faculty/classes/request", json={"section_id": world["sid"]}).status_code == 403
     assert api_post(sc, "/api/admin/assignments", json={"faculty_id": 1, "section_id": world["sid"]}).status_code == 403
-    assert api_post(fc, "/api/admin/admins", json={"full_name": "x", "email": "x@y.z", "password": "x",
-                                                   "confirm_password": "x"}).status_code == 403
+    assert api_post(fc, "/api/admin/admins", json={"full_name": "x", "email": "x@y.z"}).status_code == 403
     assert api_post(ac, "/api/meetings", json={"faculty_id": 1, "reason": "x"}).status_code == 403
     # unknown API paths are JSON 404s
     nf = sc.get("/api/does/not/exist")

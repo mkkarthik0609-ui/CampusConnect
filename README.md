@@ -51,7 +51,7 @@ CampusConnect/
 │   ├── errors.py           JSON error handlers, SPA index fallback
 │   ├── schemas.py          shared response shapes
 │   └── routers/            system, auth, account, academic, notifications, uploads, admin,
-│                           admin_academic, faculty, student, chat, meetings, supporting, research
+│                           admin_academic, admin_passkeys, faculty, student, chat, meetings, supporting, research
 ├── services/               business logic (auth, captcha, academic, assignment, permission, chat, meeting,
 │   │                       supporting, notification, file, session) + errors.py
 │   └── scheduling/         RESEARCH ONLY: core engine, fcfs, rule_based, intelligent, metrics,

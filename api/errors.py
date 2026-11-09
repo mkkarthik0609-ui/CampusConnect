@@ -23,7 +23,7 @@ from api.settings import get_settings
 
 logger = logging.getLogger("campusconnect.api")
 
-RESERVED_PREFIXES = ("/api", "/uploads", "/healthz", "/assets", "/docs", "/redoc", "/openapi.json")
+RESERVED_PREFIXES = ("/api", "/uploads", "/health", "/healthz", "/assets", "/docs", "/redoc", "/openapi.json")
 
 _STATUS_CODES = {
     400: "bad_request", 401: "unauthenticated", 403: "forbidden", 404: "not_found",

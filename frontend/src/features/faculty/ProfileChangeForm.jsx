@@ -58,8 +58,8 @@ export function ProfileChangeForm({ current, fallbackDepartments = [] }) {
   const formError = errors.form || errors.department || (errors.validation_error ?? "");
 
   return (
-    <form onSubmit={onSubmit} noValidate className="grid gap-5">
-      <div className="grid gap-5 sm:grid-cols-2">
+    <form onSubmit={onSubmit} noValidate className="grid grid-cols-1 gap-5">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
         <FormField label="New department" error={errors.department} hint={current?.department ? `Currently ${current.department}` : undefined}>
           {({ id, describedBy, invalid }) => (
             <Select value={department} onValueChange={setDepartment} disabled={submit.isPending}>

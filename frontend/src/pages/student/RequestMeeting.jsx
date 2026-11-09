@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/app/PageHeader";
 import { FormField } from "@/components/app/FormField";
-import { ListSkeleton } from "@/components/app/PageLoader";
+import { FormSkeleton } from "@/components/app/skeletons";
 import { Notice } from "@/components/app/Notice";
 import { SubmitButton } from "@/components/app/SubmitButton";
 import { UserAvatar } from "@/components/app/UserAvatar";
@@ -59,7 +59,7 @@ export default function RequestMeeting() {
       <PageHeader title={title} back={{ to: "/student/dashboard", label: "Dashboard" }} />
 
       {dash.isPending ? (
-        <ListSkeleton rows={2} />
+        <FormSkeleton fields={3} className="max-w-xl" />
       ) : dash.isError ? (
         <Notice tone="danger" title="Could not load this page">
           {dash.error.message}
@@ -71,7 +71,7 @@ export default function RequestMeeting() {
           <Link to="/student/find-faculty" className="underline">Find faculty</Link> to send a supporting request.
         </Notice>
       ) : (
-        <form onSubmit={onSubmit} noValidate className="grid max-w-2xl gap-5 rounded-lg border border-line bg-card p-[clamp(1rem,3vw,1.75rem)] shadow-sm">
+        <form onSubmit={onSubmit} noValidate className="grid grid-cols-1 max-w-2xl gap-5 rounded-lg border border-line bg-card p-[clamp(1rem,3vw,1.75rem)] shadow-sm">
           <div className="flex items-center gap-3">
             <UserAvatar name={faculty.full_name} src={faculty.profile_picture_url} size="md" />
             <p className="m-0 min-w-0">

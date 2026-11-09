@@ -9,7 +9,7 @@ import { PageHeader, SectionHeading } from "@/components/app/PageHeader";
 import { ClassPath } from "@/components/app/ClassPath";
 import { EmptyState } from "@/components/app/EmptyState";
 import { FormField } from "@/components/app/FormField";
-import { ListSkeleton } from "@/components/app/PageLoader";
+import { ProfileSkeleton } from "@/components/app/skeletons";
 import { Notice } from "@/components/app/Notice";
 import { StatusPill } from "@/components/app/StatusPill";
 import { SubmitButton } from "@/components/app/SubmitButton";
@@ -35,19 +35,19 @@ export default function StudentProfile() {
     <>
       <PageHeader title="My profile" description={s?.class ? <ClassPath cls={s.class} /> : undefined} />
       {query.isPending ? (
-        <ListSkeleton rows={4} />
+        <ProfileSkeleton />
       ) : query.isError ? (
         <Notice tone="danger" title="Could not load your profile">
           {query.error.message}
           <Button variant="outline" size="sm" className="mt-2" onClick={() => query.refetch()}>Try again</Button>
         </Notice>
       ) : (
-        <div className="grid items-start gap-6 min-[64rem]:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+        <div className="grid grid-cols-1 items-start gap-6 min-[64rem]:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <section aria-label="Your details" className={panel}>
             <PhotoBlock student={s} />
             <Details student={s} faculty={query.data.assigned_faculty} />
           </section>
-          <div className="grid gap-6">
+          <div className="grid grid-cols-1 gap-6">
             <ChangeRequestForm student={s} hasFaculty={query.data.assigned_faculty.length > 0} />
             <RequestHistory items={query.data.permission_requests} />
           </div>
@@ -192,8 +192,8 @@ function ChangeRequestForm({ student, hasFaculty }) {
           Requests cannot be routed until Admin assigns someone. Please try again later.
         </Notice>
       ) : (
-        <form onSubmit={onSubmit} noValidate className="grid gap-4">
-          <div className="grid gap-4 min-[34rem]:grid-cols-2">
+        <form onSubmit={onSubmit} noValidate className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 gap-4 min-[34rem]:grid-cols-2">
             <FormField label="New phone" error={errors.phone}>
               <Input type="tel" inputMode="tel" autoComplete="off" value={form.phone} onChange={set("phone")} placeholder={student.phone || undefined} />
             </FormField>
@@ -231,7 +231,7 @@ function RequestHistory({ items }) {
       ) : (
         <ul className="m-0 list-none p-0">
           {items.map((r) => (
-            <li key={r.id} className="grid gap-1 border-t border-line px-5 py-3.5 first:border-t-0">
+            <li key={r.id} className="grid grid-cols-1 gap-1 border-t border-line px-5 py-3.5 first:border-t-0">
               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <p className="m-0 min-w-0 font-semibold break-words">{summarize(r.requested_changes) || "Profile change"}</p>
                 <StatusPill status={r.status} />

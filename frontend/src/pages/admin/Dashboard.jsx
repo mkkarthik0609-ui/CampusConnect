@@ -6,6 +6,7 @@ import {
 import { PageHeader, SectionHeading } from "@/components/app/PageHeader";
 import { Notice } from "@/components/app/Notice";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LedgerSkeleton, SkeletonRegion } from "@/components/app/skeletons";
 import { adminApi, adminKeys } from "@/lib/endpoints";
 import { QueryError } from "@/features/admin/common";
 import { cn } from "@/lib/utils";
@@ -64,10 +65,10 @@ export default function AdminDashboard() {
       <section aria-label="Needs your attention" className="mb-8">
         <SectionHeading title="Needs your attention" />
         {q.isPending ? (
-          <div className="grid gap-3" role="status" aria-busy="true"><span className="sr-only">Loading</span>{[0, 1, 2].map((i) => <Skeleton key={i} className="h-[4.5rem]" />)}</div>
+          <SkeletonRegion className="grid grid-cols-1 gap-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-[4.5rem]" />)}</SkeletonRegion>
         ) : s ? (
           <>
-            <ul className="m-0 grid list-none gap-3 p-0">
+            <ul className="m-0 grid grid-cols-1 list-none gap-3 p-0">
               <Attention to="/admin/assignment-requests" count={s.pending_assignment_count} icon={Inbox} title="Class requests from faculty">
                 {s.pending_assignment_count ? "Faculty are waiting to be assigned to a class." : "No pending requests."}
               </Attention>
@@ -90,9 +91,9 @@ export default function AdminDashboard() {
       <section aria-label="Campus figures" className="mb-8">
         <SectionHeading title="Campus today" />
         {q.isPending ? (
-          <Skeleton className="h-40 w-full" />
+          <LedgerSkeleton />
         ) : s ? (
-          <dl className="m-0 grid gap-px overflow-hidden rounded-lg border bg-line shadow-sm sm:grid-cols-2 lg:grid-cols-3">
+          <dl className="m-0 grid grid-cols-1 gap-px overflow-hidden rounded-lg border bg-line shadow-sm sm:grid-cols-2 lg:grid-cols-3">
             {LEDGER.map(({ key, label, to, icon: Icon }) => (
               <div key={key} className="bg-card">
                 <Link to={to} className="flex items-center justify-between gap-3 px-5 py-4 text-inherit no-underline transition-colors hover:bg-primary-soft">
@@ -110,7 +111,7 @@ export default function AdminDashboard() {
 
       <section aria-label="Quick links">
         <SectionHeading title="Jump to" />
-        <ul className="m-0 grid list-none gap-x-8 p-0 sm:grid-cols-2">
+        <ul className="m-0 grid grid-cols-1 list-none gap-x-8 p-0 sm:grid-cols-2">
           {QUICK.map(({ to, label, hint, icon: Icon }) => (
             <li key={to} className="border-b border-line">
               <Link to={to} className="flex items-center gap-3 py-3 text-inherit no-underline hover:text-primary">

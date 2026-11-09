@@ -26,7 +26,7 @@ export function SupportingRequestRow({ request }) {
 
   return (
     <Row>
-      <div className="grid min-w-0 flex-1 basis-60 gap-1.5">
+      <div className="grid grid-cols-1 min-w-0 flex-1 basis-60 gap-1.5">
         <PersonCell name={student.full_name} src={student.profile_picture_url} code={student.usn} />
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-12 text-sm text-muted-foreground">
           {student.class ? <ClassPath cls={student.class} /> : null}

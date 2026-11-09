@@ -61,7 +61,7 @@ export function MetricChart({ levels, metrics, metricKey, onMetricChange, load, 
         ))}
       </div>
 
-      <div role="group" aria-labelledby={`${uid}-cap`} className="grid gap-2">
+      <div role="group" aria-labelledby={`${uid}-cap`} className="grid grid-cols-1 gap-2">
         {LOADS.map((l) => {
           const t = levels?.[l.id]?.table;
           if (!t) return null;

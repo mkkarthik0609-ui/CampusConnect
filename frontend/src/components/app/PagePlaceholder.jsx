@@ -16,7 +16,7 @@ export function PagePlaceholder({ title, description, file, endpoints = [] }) {
   return (
     <>
       <PageHeader title={title} description={description} />
-      <div className="rounded-lg border bg-card shadow-sm">
+      <div className="rounded-xl border bg-card">
         <EmptyState icon={Construction} title="This page is not built yet">
           <p>
             Route <code className="rounded bg-sunken px-1.5 py-0.5 font-mono text-[0.8125rem] text-ink-2">{pathname}</code> is wired up and

@@ -46,7 +46,7 @@ export default function FacultyClassDetail() {
   return (
     <>
       <PageHeader
-        title={cls ? <ClassPath cls={cls} size="lg" /> : "Class"}
+        title={cls ? <ClassPath cls={cls} size="lg" className="font-sans tracking-normal" /> : "Class"}
         documentTitle={cls ? `Class ${cls.label}` : "Class"}
         back={{ to: "/faculty/classes", label: "My classes" }}
         description={query.data ? `${pluralize(total, "registered student")}, ${pluralize(query.data.co_faculty.length, "faculty member")} teaching.` : undefined}
@@ -55,7 +55,7 @@ export default function FacultyClassDetail() {
       {query.isError && !query.error?.isForbidden ? <QueryError error={query.error} onRetry={() => query.refetch()} title="Could not load this class" /> : null}
 
       {!query.isError ? (
-        <div className="grid items-start gap-x-10 gap-y-9 lg:grid-cols-[minmax(0,1fr)_16rem]">
+        <div className="grid grid-cols-1 items-start gap-x-10 gap-y-9 lg:grid-cols-[minmax(0,1fr)_16rem]">
           <Panel
             title="Students"
             count={query.data ? total : null}

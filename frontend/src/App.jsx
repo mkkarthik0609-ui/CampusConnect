@@ -7,23 +7,26 @@ import { ThemeProvider } from "@/lib/theme";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { DialogsProvider } from "@/components/app/dialogs";
+import { AppErrorBoundary } from "@/components/app/ErrorBoundary";
 import { routes } from "@/routes";
 
-/** Provider stack: data cache > auth > theme > tooltips > confirm/prompt dialogs > router. */
+/** Provider stack: data cache > crash boundary > auth > theme > tooltips > confirm/prompt dialogs > router. */
 export default function App() {
   const [router] = useState(() => createBrowserRouter(routes));
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <ThemeProvider>
-          <TooltipProvider delayDuration={250}>
-            <DialogsProvider>
-              <RouterProvider router={router} />
-              <Toaster />
-            </DialogsProvider>
-          </TooltipProvider>
-        </ThemeProvider>
-      </AuthProvider>
+      <AppErrorBoundary>
+        <AuthProvider>
+          <ThemeProvider>
+            <TooltipProvider delayDuration={250}>
+              <DialogsProvider>
+                <RouterProvider router={router} />
+                <Toaster />
+              </DialogsProvider>
+            </TooltipProvider>
+          </ThemeProvider>
+        </AuthProvider>
+      </AppErrorBoundary>
     </QueryClientProvider>
   );
 }

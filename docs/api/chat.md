@@ -23,13 +23,22 @@ All shapes use ids as integers and timestamps as `YYYY-MM-DD HH:MM:SS` (UTC).
   "class": { "section_id": 7, "branch": "CSE", "department": "AIML", "year": "3rd Year", "section": "A",
              "label": "CSE → AIML → 3rd Year → A" } }
 
-// message
-{ "id": 2, "is_mine": true, "message_text": "Notes attached",       // null for an attachment without caption
+// message  (the same shape on /api/admin-messages)
+{ "id": 2, "is_mine": true, "sender_name": "Asha Rao",
+  "message_text": "Notes attached",       // null for an attachment without caption, and for an unsent message
   "attachment": { "url": "/uploads/chat/<uuid>.pdf", "name": "notes.pdf", "type": "pdf", "is_image": false } /* or null */,
-  "is_seen": false,        // has the OTHER side read it (for incoming messages: always true once you fetched them)
+  "status": "sent",        // sent (one tick) -> delivered (two grey ticks) -> seen (two blue ticks)
+  "is_seen": false,        // = status == "seen" (for incoming messages: always true once you fetched them)
+  "delivered_at": null, "seen_at": null,
   "is_edited": false,
-  "can_edit": false,       // is_mine && !is_seen && no attachment
-  "created_at": "2026-10-01 03:12:49", "updated_at": "2026-10-01 03:12:49" }
+  "is_unsent": false,      // "Unsend for everyone" tombstone: no text, no attachment, no quote - ever
+  "unsent_at": null,
+  "can_edit": false,       // is_mine && !is_unsent && no attachment && sent less than 15 minutes ago
+  "can_unsend": true,      // is_mine && !is_unsent
+  "reply_to": { "id": 1, "is_mine": false, "sender_user_id": 4, "sender_name": "Dr. Meera Nair",
+                "text_preview": "Can we meet?", "attachment_kind": null /* "image" | "file" */,
+                "attachment_name": null, "unsent": false } /* or null */,
+  "created_at": "2026-10-01 03:12:49", "updated_at": "2026-10-01 03:12:49" }   // updated_at changes with every state change
 ```
 Attachments are downloaded with `GET attachment.url` (session cookie; only the two participants and Admins can read it).
 
@@ -44,17 +53,22 @@ My conversations, newest activity first (chats without messages last). Chats who
       "other": { "role": "STUDENT", "id": 1, "code": "1AB21CS001", "usn": "1AB21CS001", "full_name": "Asha Rao",
                  "profile_picture_url": null, "class": { "section_id": 7, "branch": "CSE", "department": "AIML",
                  "year": "3rd Year", "section": "A", "label": "CSE → AIML → 3rd Year → A" } },
-      "unread_count": 1,
-      "last_message": "Notes attached",          // text, "Attachment: <name>" or null
+      "unread_count": 1,                         // incoming, visible, not unsent, not yet seen
+      "last_message": "Notes attached",          // text, "Attachment: <name>", "You unsent a message" / "<Name> unsent a message", or null
       "last_message_at": "2026-10-01 03:12:49",  // null when empty
       "last_message_is_mine": true,              // null when empty
+      "last_message_is_unsent": false,           // null when empty
+      "last_message_status": "delivered",        // ticks of MY last message (null when it is not mine)
       "updated_at": "2026-10-01 03:12:49" }
   ],
   "total": 1,
   "total_unread": 1
 }
 ```
-`unread_count` = incoming messages not yet seen by me. Listing does **not** mark anything as seen.
+`other` also carries `online` (bool), `last_active_at` (UTC, null when unknown) and `typing` (bool): presence is the
+other participant's last fetch/poll/send, kept in memory (see *Typing and presence* below).
+Messages "deleted for me" are ignored for the preview and the unread count. `unread_count` = incoming messages not yet
+seen by me. Listing marks the incoming messages of the listed chats as **delivered** (never as seen).
 
 ## POST `/api/chat/open`
 Get-or-create the conversation. Does not mark messages as seen.
@@ -69,32 +83,35 @@ Errors: 400 `validation_error` — the required id is missing, or the *other rol
 `You can only message students in your assigned classes or supporting students.` (faculty).
 Unknown ids also give 403 (no existence oracle).
 
-## GET `/api/chat/{chat_id}?after_id=0`
-Participant only. **Marks every incoming message of this chat as seen** (so `is_seen` of the sender's messages flips
-for them on their next fetch). `after_id` (optional, default 0) returns only messages with a larger id — use
-`last_id` for polling.
+## GET `/api/chat/{chat_id}?after_id=0&updated_since=`
+Participant only. **Marks every incoming message of this chat as seen** (so the sender's messages flip to `seen` on their
+next fetch). Messages "deleted for me" by the viewer are omitted. Efficient polling (2.5 s while the tab is focused):
+send `after_id=<last_id>` and `updated_since=<server_time>` of the previous response; the response then contains the **new**
+messages (`id > after_id`) **and** older ones that changed at/after `updated_since` (ticks, edit, unsend): merge by `id`.
+`updated_since` is an ISO-8601 timestamp (`2026-10-01T03:12:49Z`, any offset; `YYYY-MM-DD HH:MM:SS` UTC also works), 400 when malformed.
 ```json
 {
-  "chat": { "id": 1, "other": { /* other party */ }, "created_at": "2026-10-01 03:12:49", "updated_at": "2026-10-01 03:12:49" },
+  "chat": { "id": 1, "other": { /* other party + online, last_active_at, typing */ }, "created_at": "2026-10-01 03:12:49", "updated_at": "2026-10-01 03:12:49" },
   "messages": [ { /* message */ } ],            // oldest first
-  "last_id": 2                                  // id of the last returned message (= after_id when none)
+  "last_id": 2,                                 // highest id returned (>= after_id)
+  "server_time": "2026-10-01 03:12:55"          // pass back as updated_since
 }
 ```
 Errors: 403 `forbidden` (`You do not have access to this conversation.` for non-participants;
 `This faculty member is no longer assigned to your class.` / `This student is no longer in one of your assigned classes.`),
-404 `not_found` (`Conversation not found.`), 400 (non-integer id).
+404 `not_found` (`Conversation not found.`), 400 (non-integer id, bad `updated_since`).
 
 ## POST `/api/chat/{chat_id}/messages`
-Either **JSON** `{ "message_text": "Good morning sir" }` (1–4000 chars after trimming) **or** `multipart/form-data` with
-field `attachment` (PDF / PNG / JPG / JPEG / DOCX, <= 8 MB, magic bytes checked) and an optional `message_text` caption.
-Access is checked before any file is stored.
+Either **JSON** `{ "message_text": "Good morning sir", "reply_to_id": 7 }` (1–4000 chars after trimming) **or** `multipart/form-data` with
+field `attachment` (PDF / PNG / JPG / JPEG / DOCX, <= 8 MB, magic bytes checked), an optional `message_text` caption and an optional `reply_to_id` form field.
+`reply_to_id` (optional) must be a message of **this** chat, otherwise 400. Access and the quote are checked before any file is stored.
 
 201
 ```json
 { "ok": true, "message": "Message sent.",
   "item": { "id": 1, "is_mine": true, "message_text": "Good morning sir", "attachment": null,
-            "is_seen": false, "is_edited": false, "can_edit": true,
-            "created_at": "2026-10-01 03:12:49", "updated_at": "2026-10-01 03:12:49" } }
+            "status": "sent", "is_seen": false, "is_edited": false, "is_unsent": false, "can_edit": true, "can_unsend": true,
+            "reply_to": null, "created_at": "2026-10-01 03:12:49", "updated_at": "2026-10-01 03:12:49" } }
 ```
 The recipient gets a `NEW_MESSAGE` notification.
 
@@ -107,9 +124,52 @@ over 4000 chars, unsupported / mismatching / empty file, unknown JSON fields (e.
 ```json
 { "message_text": "Thank you sir" }
 ```
-Only the **sender**, only while the message is **unseen**, only **text** messages, only while chat access exists.
-200 `{"ok": true, "message": "Message updated.", "item": { /* message, is_edited: true */ }}`
+WhatsApp rule: only the **sender**, only **text** messages (no attachments), not unsent, and only within **15 minutes** of
+sending (seen or not), while chat access exists. The message gets `is_edited: true`.
+200 `{"ok": true, "message": "Message updated.", "item": { /* message */ }}`
 
 Errors: 400 (`Message cannot be empty.`, too long, `Attachments cannot be edited.`);
 403 `forbidden` (`You can only edit your own messages.`, non-participant, access revoked);
-404 `not_found` (`Message not found.`); 409 `conflict` (`This message has already been seen and can no longer be edited.`).
+404 `not_found` (`Message not found.`); 409 `conflict` (`The 15-minute edit window has already passed for this message.`,
+`This message was already unsent.`).
+
+## POST `/api/chat/messages/{message_id}/unsend`
+Instagram-style **Unsend for everyone**. No body. Only the sender, at any time (even after it was seen), while chat access exists.
+The message becomes a tombstone for both participants *and the admin viewer*: `is_unsent: true`, `unsent_at` set, `message_text` /
+`attachment` / `reply_to` gone, the stored text is wiped and the uploaded file is **deleted from disk** (its URL 404s). It can no longer be
+edited, and replies that quoted it show `reply_to.unsent: true` without the text. The chat list shows `You unsent a message` /
+`<Name> unsent a message`. **Idempotent**: unsending again returns 200 with the tombstone.
+
+200 `{"ok": true, "message": "Message unsent.", "item": { /* message */ }}`.
+Errors: 403 (not the sender, non-participant, access revoked), 404 (`Message not found.`).
+
+## POST `/api/chat/messages/{message_id}/delete-for-me`
+Hides the message for the caller only (a participant, access still valid). The other side keeps seeing it, and so does the admin
+viewer. Hidden messages disappear from the thread, the list preview and the unread count. **Idempotent**.
+200 `{"ok": true, "message": "Message deleted for you.", "id": 5}`. Errors: 403, 404.
+
+## POST `/api/chat/{chat_id}/typing`
+"I am typing" signal, valid for ~5 seconds (the client should call it at most every ~3 s while typing; sending a message clears it).
+200 `{"ok": true}`. The other participant sees `chat.other.typing: true` in `GET /api/chat/{id}` and `other.typing` in the list.
+Errors: 403 / 404 exactly like reading the chat.
+
+### Typing and presence
+Both live in memory (`services/presence.py`; the app runs a single worker, restart = unknown). `other.online` is true when the
+other participant fetched, polled, sent or signalled typing within the last 30 seconds; `other.last_active_at` is that moment
+(UTC) or `null`.
+
+---
+
+## Faculty <-> admin messages — `/api/admin-messages/*`
+Roles: FACULTY or ADMIN (students 403). Same message shape and behaviour as the chat above (ticks, `reply_to`, 15-minute edit
+window, unsend, delete-for-me, `after_id` + `updated_since`, typing, presence). The conversation id is the **faculty member's user id**
+(faculty can only use their own; an admin can use any active faculty member). Router: `api/routers/admin_messages.py`.
+Attachments are not supported here (text up to 5000 chars).
+
+| Method + path | Purpose |
+|---|---|
+| `GET /api/admin-messages` | conversations: `{ items: [{ conversation_id, other, unread_count, last_message, last_message_at, last_message_is_mine, last_message_is_unsent, last_message_status }], total, total_unread }`. Faculty get one item (the admin); an admin gets every active faculty member, conversations with messages first. Marks incoming messages delivered. |
+| `GET /api/admin-messages/{faculty_user_id}?after_id=&updated_since=` | `{ chat: { id, other }, messages, last_id, server_time }`; marks incoming messages seen. 403 for another faculty's conversation, 404 unknown faculty. |
+| `POST /api/admin-messages` | send `{ message_text, reply_to_id?, recipient_user_id? }` (`recipient_user_id` required for admins) -> 201 `{ ok, id, item }`. |
+| `POST /api/admin-messages/{faculty_user_id}/typing` | typing signal. |
+| `POST /api/admin-messages/messages/{id}/edit` \| `/unsend` \| `/delete-for-me` | as for chat (participants only; edit / unsend sender only). |

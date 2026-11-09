@@ -63,7 +63,7 @@ def test_chat_allowed_via_accepted_supporting_relationship(app, world):
         assert chat["id"]
 
 
-def test_message_edit_locked_after_seen(app, world):
+def test_message_edit_window_is_fifteen_minutes_not_unseen_only(app, world):
     assign(app, world["fac"], world["sec"], world["admin"])
     stu_user, fac_user = world["stu"]["user_id"], world["fac"]["user_id"]
     sid, fid = world["stu"]["student_id"], world["fac"]["faculty_id"]
@@ -71,7 +71,7 @@ def test_message_edit_locked_after_seen(app, world):
         chat = chat_service.open_chat(sid, fid, stu_user)
         message_id = chat_service.send_text_message(chat["id"], stu_user, "Hello")
 
-        chat_service.edit_message(message_id, stu_user, "Hello edited")  # editable while unseen
+        chat_service.edit_message(message_id, stu_user, "Hello edited")  # editable within the window
         message = queries.get_message_by_id(message_id)
         assert message["message_text"] == "Hello edited"
         assert message["is_edited"] == 1
@@ -79,10 +79,13 @@ def test_message_edit_locked_after_seen(app, world):
         # merely opening the chat does not mark anything seen ...
         chat_service.open_chat_as_faculty(fid, sid, fac_user)
         chat_service.edit_message(message_id, stu_user, "Still editable")
-        # ... reading it does
+        # ... reading it does, but seen messages stay editable (WhatsApp rule: 15 minutes from sending)
         queries.mark_messages_seen(chat["id"], fac_user)
-        with pytest.raises(chat_service.ChatEditError):
+        chat_service.edit_message(message_id, stu_user, "Edited after seen")
+        db_exec(app, "UPDATE messages SET created_at = datetime('now', '-16 minutes') WHERE id = ?", (message_id,))
+        with pytest.raises(chat_service.ChatEditError, match="already passed"):
             chat_service.edit_message(message_id, stu_user, "Too late")
+        assert queries.get_message_by_id(message_id)["message_text"] == "Edited after seen"
 
 
 def test_only_sender_can_edit(app, world):
@@ -215,7 +218,7 @@ def test_send_view_and_seen_flow(app, pair):
 
     # the sender sees "seen" and can no longer edit
     mine = sc.get(f"/api/chat/{cid}").json()["messages"][0]
-    assert mine["is_mine"] is True and mine["is_seen"] is True and mine["can_edit"] is False
+    assert mine["is_mine"] is True and mine["is_seen"] is True and mine["can_edit"] is True  # 15-minute window
     # after_id polling
     assert sc.get(f"/api/chat/{cid}?after_id={mine['id']}").json()["messages"] == []
 
@@ -230,11 +233,15 @@ def test_edit_message_rules_over_http(app, pair):
     assert r.json()["item"]["is_edited"] is True
     assert api_post(sc, f"/api/chat/messages/{mid}/edit", json={"message_text": "   "}).status_code == 400
     assert api_post(sc, f"/api/chat/messages/{mid}/edit", json={"message_text": "x" * 4001}).status_code == 400
-    fc.get(f"/api/chat/{cid}")  # faculty reads it
+    fc.get(f"/api/chat/{cid}")  # faculty reads it: still editable inside the 15-minute window
+    r = api_post(sc, f"/api/chat/messages/{mid}/edit", json={"message_text": "student edit 2"})
+    assert r.status_code == 200
+    db_exec(app, "UPDATE messages SET created_at = datetime('now', '-16 minutes')")
     r = api_post(sc, f"/api/chat/messages/{mid}/edit", json={"message_text": "too late"})
-    assert r.status_code == 409 and "already been seen" in r.json()["error"]["message"]
+    assert r.status_code == 409 and "already passed" in r.json()["error"]["message"]
+    assert sc.get(f"/api/chat/{cid}").json()["messages"][0]["can_edit"] is False
     assert api_post(sc, "/api/chat/messages/99999/edit", json={"message_text": "x"}).status_code == 404
-    assert db_one(app, "SELECT message_text FROM messages")["message_text"] == "student edit"
+    assert db_one(app, "SELECT message_text FROM messages")["message_text"] == "student edit 2"
 
 
 def test_send_validation(app, pair):

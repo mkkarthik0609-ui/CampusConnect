@@ -92,12 +92,18 @@ CREATE TABLE IF NOT EXISTS admin_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    message_text TEXT NOT NULL,
+    message_text TEXT,                      -- NULL once unsent (api/db.py::_migrate rebuilds old tables without the blank-text CHECK)
     is_seen INTEGER NOT NULL DEFAULT 0,
     seen_at TEXT,
+    delivered_at TEXT,
+    is_edited INTEGER NOT NULL DEFAULT 0,
+    is_unsent INTEGER NOT NULL DEFAULT 0,
+    unsent_at TEXT,
+    reply_to_id INTEGER REFERENCES admin_messages(id) ON DELETE SET NULL,
+    hidden_by_sender INTEGER NOT NULL DEFAULT 0,     -- "Delete for me"
+    hidden_by_recipient INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    CHECK (length(trim(message_text)) > 0)
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_admin_messages_pair ON admin_messages(sender_user_id, recipient_user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_admin_messages_recipient ON admin_messages(recipient_user_id, is_seen, created_at);
@@ -124,6 +130,12 @@ CREATE TABLE IF NOT EXISTS messages (
     is_seen INTEGER NOT NULL DEFAULT 0,
     seen_at TEXT,
     is_edited INTEGER NOT NULL DEFAULT 0,
+    delivered_at TEXT,                      -- set when the recipient's client fetched it (double grey tick)
+    is_unsent INTEGER NOT NULL DEFAULT 0,   -- "Unsend for everyone": text + attachment are wiped
+    unsent_at TEXT,
+    reply_to_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    hidden_by_sender INTEGER NOT NULL DEFAULT 0,     -- "Delete for me"
+    hidden_by_recipient INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

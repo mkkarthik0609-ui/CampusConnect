@@ -67,7 +67,7 @@ export default function FacultyFindStudents() {
           You can discover students across the campus. An Admin assignment or accepted supporting relationship is still required before messaging or sending a supporting request.
         </p>
       ) : null}
-      <div className="grid max-w-3xl gap-5">
+      <div className="grid grid-cols-1 max-w-3xl gap-5">
           <form role="search" onSubmit={(e) => e.preventDefault()} className="relative">
             <label htmlFor="student-search" className="sr-only">Search students by name or USN</label>
             <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3.5 size-[1.15rem] -translate-y-1/2 text-muted-foreground" />
@@ -103,7 +103,7 @@ export default function FacultyFindStudents() {
                   <RowList label="Matching students">
                     {results.map((s) => (
                       <Row key={s.id}>
-                        <div className="grid min-w-0 flex-1 basis-60 gap-1.5">
+                        <div className="grid grid-cols-1 min-w-0 flex-1 basis-60 gap-1.5">
                           <PersonCell name={s.full_name} src={s.profile_picture_url} code={s.usn} />
                           {s.class ? <div className="pl-12"><ClassPath cls={s.class} /></div> : null}
                         </div>

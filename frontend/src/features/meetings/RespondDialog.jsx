@@ -47,7 +47,7 @@ export function RespondDialog({ meeting, open, onOpenChange, onRespond }) {
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!busy) onOpenChange(next); }}>
       <DialogContent>
-        <form onSubmit={(e) => { e.preventDefault(); decide("accept"); }} noValidate className="grid gap-4">
+        <form onSubmit={(e) => { e.preventDefault(); decide("accept"); }} noValidate className="grid grid-cols-1 gap-4">
           <DialogHeader>
             <DialogTitle>Respond to {student?.full_name || "this request"}</DialogTitle>
             <DialogDescription>

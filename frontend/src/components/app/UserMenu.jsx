@@ -32,19 +32,19 @@ export function UserMenu({ onNavigate }) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex min-h-12 w-full min-w-0 items-center gap-3 rounded-xl px-2 py-1.5 text-left text-nav-ink transition-colors hover:bg-nav-hover hover:text-white data-[state=open]:bg-nav-hover"
+          className="flex min-h-12 w-full min-w-0 items-center gap-3 rounded-[8px] border border-transparent px-2 py-1.5 text-left text-nav-ink outline-none transition-[background-color,border-color] duration-200 hover:border-nav-line hover:bg-nav-hover hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 data-[state=open]:border-nav-line data-[state=open]:bg-nav-hover"
         >
           <UserAvatar name={user.full_name} src={user.profile_picture_url} size="sm" />
-          <span className="grid min-w-0 flex-1 leading-tight">
-            <span className="truncate text-[0.93rem] font-semibold text-white">{user.full_name}</span>
-            <span className="text-[0.8125rem] text-nav-muted">{ROLE_LABEL[role] || role}</span>
+          <span className="grid grid-cols-1 min-w-0 flex-1 leading-tight">
+            <span className="truncate text-[0.9rem] font-medium text-white">{user.full_name}</span>
+            <span className="micro text-nav-muted">{ROLE_LABEL[role] || role}</span>
           </span>
           <ChevronsUpDown aria-hidden="true" className="size-4 shrink-0 text-nav-muted" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-56">
         <DropdownMenuLabel className="px-2.5 py-2 font-normal">
-          <span className="block truncate text-sm font-semibold text-foreground">{user.full_name}</span>
+          <span className="block truncate text-sm font-medium text-foreground">{user.full_name}</span>
           <span className="block truncate text-[0.8125rem] text-muted-foreground">{user.email}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -52,7 +52,7 @@ export function UserMenu({ onNavigate }) {
           <DropdownMenuItem onSelect={() => go(profilePath)}><UserRound aria-hidden="true" /> Profile</DropdownMenuItem>
         ) : null}
         <DropdownMenuItem onSelect={() => go("/account/password")}><KeyRound aria-hidden="true" /> Change password</DropdownMenuItem>
-        <DropdownMenuItem onSelect={toggle}>
+        <DropdownMenuItem onSelect={(e) => toggle(e)}>
           {theme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
           {theme === "dark" ? "Light mode" : "Dark mode"}
         </DropdownMenuItem>
