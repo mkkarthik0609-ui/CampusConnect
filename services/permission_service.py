@@ -55,6 +55,9 @@ def faculty_request_profile_change(faculty_user_id, changes: dict, reason=None):
         me = queries.get_faculty_by_user_id(faculty_user_id)
         if clash and (not me or clash["id"] != me["id"]):
             raise PermissionError_("That professional email is already in use.")
+        from services.auth_service import _reserved_for_admin
+        if _reserved_for_admin(changes["professional_email"]):  # primary admin / invited-admin addresses
+            raise PermissionError_("That professional email is already in use.")
     if "department" in changes and changes["department"].lower() not in {
         d.lower() for d in aq.list_active_department_names()
     }:
@@ -110,7 +113,8 @@ def decide_permission_request(request_id, approver_user_id, approve: bool):
                 new_email = changes.get("professional_email")
                 if new_email:
                     holder = queries.get_user_by_email(new_email)
-                    if holder and holder["id"] != faculty["user_id"]:
+                    from services.auth_service import _reserved_for_admin
+                    if (holder and holder["id"] != faculty["user_id"]) or _reserved_for_admin(new_email):
                         raise PermissionError_("That email address is already in use, so the change cannot be applied.")
                 queries.update_faculty_fields(faculty["id"], changes)
 

@@ -238,11 +238,11 @@ def _is_locked_out(identifier, ip):
     limit = cfg.login_max_failures_per_identifier
     if ip:
         # The lock is per (account, client address): somebody who types the owner's e-mail five times from their own
-        # address locks only THEMSELVES out, never the owner. A much higher total per account is the brake for a
+        # address locks only THEMSELVES out, never the owner. A higher total per account (4x) is the brake for a
         # guessing attack spread over many addresses.
         if sq.count_recent_failures_for_identifier_ip(identifier, ip, window) >= limit:
             return True
-        if sq.count_recent_failures_for_identifier(identifier, window) >= limit * 10:
+        if sq.count_recent_failures_for_identifier(identifier, window) >= limit * 4:
             return True
         return sq.count_recent_failures_for_ip(ip, window) >= cfg.login_max_failures_per_ip
     return sq.count_recent_failures_for_identifier(identifier, window) >= limit

@@ -207,3 +207,12 @@ def test_many_more_requests_than_pooled_connections_never_deadlock(tmp_path):
     assert not errors, errors
     assert statuses.count(200) == 40, statuses
     assert time.time() - started < 15
+
+
+def test_faculty_cannot_move_onto_an_admin_reserved_address(app):
+    from services import permission_service
+    stu, fac, admin_id = _world(app)
+    with dbmod.db_session(app.state.settings):
+        for reserved in ("mkkarthik0609@gmail.com",):
+            with pytest.raises(permission_service.PermissionError_):
+                permission_service.faculty_request_profile_change(fac["user_id"], {"professional_email": reserved}, "x")
