@@ -20,10 +20,10 @@ GET falls back to `index.html`.
 - Lists: `{"items": [...]}` (plus extras such as `"total"`). Single resources: a named object, e.g. `{"student": {...}}`.
 - Errors: `{"error": {"code": "<snake_case>", "message": "<human text>", "fields": {"<field>": "<msg>"}?}}` with
   the correct status: 400 validation, 401 not signed in (`unauthenticated`), 403 forbidden (`forbidden`),
-  404 `not_found`, 405, 409 conflict, 413 too large, 429 throttled (`rate_limited`), 500 `server_error`.
+  404 `not_found`, 405, 409 conflict, 413 too large, 429 throttled (`rate_limited`), 500 `server_error`, 503 `service_unavailable` with `Retry-After` when the database is unreachable (a unique-constraint race is reported as 409 `conflict`).
   Business-rule failures from services (ValidationError, ChatAccessError, MeetingError, …) → 400 (or 403 when
   it is an authorization failure) with their message. Never return HTML from `/api/*`.
-- Dates are the SQLite strings already stored (`YYYY-MM-DD HH:MM:SS`, UTC); the SPA formats them.
+- Dates are the TEXT strings stored in PostgreSQL (`YYYY-MM-DD HH:MM:SS`, UTC); the SPA formats them.
 - IDs are integers. Use snake_case keys everywhere.
 
 ## Auth / user object

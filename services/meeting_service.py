@@ -1,3 +1,4 @@
+from api.db import get_db
 from models import queries
 from services import notification_service as notif
 
@@ -59,14 +60,16 @@ def respond_to_meeting(meeting_id, faculty_id, accept: bool, faculty_response, m
         new_status = "REJECTED"
         meeting_time_text = None
 
-    queries.respond_meeting_request(meeting_id, new_status, (faculty_response or "").strip(), meeting_time_text)
     student = queries.get_student_by_id(meeting["student_id"])
     notif_type = notif.MEETING_ACCEPTED if accept else notif.MEETING_REJECTED
     body = (
         f"Your meeting request was accepted. Timing: {meeting_time_text}"
         if accept else "Your meeting request was rejected."
     )
-    notif.notify(student["user_id"], notif_type, "Meeting request update", body, "meeting", meeting_id)
+    with get_db().transaction():  # status change + notification together; the guarded UPDATE decides races
+        if not queries.respond_meeting_request(meeting_id, new_status, (faculty_response or "").strip(), meeting_time_text):
+            raise MeetingError("This meeting request has already been responded to.")
+        notif.notify(student["user_id"], notif_type, "Meeting request update", body, "meeting", meeting_id)
     return new_status
 
 
@@ -104,12 +107,14 @@ def cancel_meeting(meeting_id, actor_user_id, actor_role, reason):
         cancelled_by = "FACULTY"
         recipient_user_id = queries.get_student_by_id(meeting["student_id"])["user_id"]
 
-    queries.cancel_meeting_request(meeting_id, cancelled_by, reason or None)
-    notif.notify(
-        recipient_user_id, notif.MEETING_CANCELLED, "Meeting cancelled",
-        f"The meeting was cancelled by the {cancelled_by.lower()}." + (f" Reason: {reason}" if reason else ""),
-        "meeting", meeting_id,
-    )
+    with get_db().transaction():
+        if not queries.cancel_meeting_request(meeting_id, cancelled_by, reason or None):
+            raise MeetingError("This meeting cannot be cancelled from its current status.")
+        notif.notify(
+            recipient_user_id, notif.MEETING_CANCELLED, "Meeting cancelled",
+            f"The meeting was cancelled by the {cancelled_by.lower()}." + (f" Reason: {reason}" if reason else ""),
+            "meeting", meeting_id,
+        )
 
 
 def complete_meeting(meeting_id, actor_user_id, actor_role):
@@ -127,11 +132,13 @@ def complete_meeting(meeting_id, actor_user_id, actor_role):
         completed_by = "FACULTY"
         recipient_user_id = queries.get_student_by_id(meeting["student_id"])["user_id"]
 
-    queries.complete_meeting_request(meeting_id, completed_by)
-    notif.notify(
-        recipient_user_id, notif.MEETING_COMPLETED, "Meeting marked completed",
-        f"The meeting was marked completed by the {completed_by.lower()}.", "meeting", meeting_id,
-    )
+    with get_db().transaction():
+        if not queries.complete_meeting_request(meeting_id, completed_by):
+            raise MeetingError("Only an accepted meeting can be marked completed.")
+        notif.notify(
+            recipient_user_id, notif.MEETING_COMPLETED, "Meeting marked completed",
+            f"The meeting was marked completed by the {completed_by.lower()}.", "meeting", meeting_id,
+        )
 
 
 def send_due_reminders(app=None):
@@ -153,20 +160,15 @@ def send_due_reminders(app=None):
         interval = timedelta(minutes=settings.reminder_interval_minutes)
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - interval
         for meeting in queries.list_active_meetings_for_reminders():
-            last = meeting["last_reminder_at"]
-            # last_reminder_at is stored by SQLite as 'YYYY-MM-DD HH:MM:SS' (space, not 'T'),
-            # so compare in that same format or same-day comparisons always look "old".
-            if last and last > cutoff.strftime("%Y-%m-%d %H:%M:%S"):
-                continue
-            student = queries.get_student_by_id(meeting["student_id"])
-            faculty = queries.get_faculty_by_id(meeting["faculty_id"])
-            label = "pending response" if meeting["status"] == "PENDING" else "upcoming/active meeting"
-            notif.notify(
-                student["user_id"], notif.MEETING_REMINDER, "Meeting reminder",
-                f"Reminder: you have a {label} ({meeting['reason']}).", "meeting", meeting["id"],
-            )
-            notif.notify(
-                faculty["user_id"], notif.MEETING_REMINDER, "Meeting reminder",
-                f"Reminder: you have a {label} ({meeting['reason']}).", "meeting", meeting["id"],
-            )
-            queries.update_meeting_reminder_time(meeting["id"])
+            # Claim first (atomic UPDATE): a restart, a second scheduler or an overlapping run can never send twice.
+            with dbmod.get_db().transaction():
+                if not queries.claim_meeting_reminder(meeting["id"], cutoff.strftime("%Y-%m-%d %H:%M:%S")):
+                    continue
+                student = queries.get_student_by_id(meeting["student_id"])
+                faculty = queries.get_faculty_by_id(meeting["faculty_id"])
+                label = "pending response" if meeting["status"] == "PENDING" else "upcoming/active meeting"
+                for user_id in (student["user_id"], faculty["user_id"]):
+                    notif.notify(
+                        user_id, notif.MEETING_REMINDER, "Meeting reminder",
+                        f"Reminder: you have a {label} ({meeting['reason']}).", "meeting", meeting["id"],
+                    )

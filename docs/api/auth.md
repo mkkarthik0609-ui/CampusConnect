@@ -30,8 +30,36 @@ Errors:
 * 401 `invalid_credentials` - `"Invalid email or password."` Identical for unknown user, wrong password and
   deactivated account (no enumeration).
 * 429 `rate_limited` - `"Too many unsuccessful attempts. Please wait a few minutes and try again."` (5 failures per
-  identifier or 20 per IP within 15 minutes; even the correct password is refused while locked).
+  identifier or 150 per IP within 15 minutes; even the correct password is refused while locked. The per-IP limit is
+  high on purpose: campus Wi-Fi shares one address).
+* 400 `captcha_required` (`fields.captcha`) - once an identifier has 3 recent failures, or the client IP has 10, the
+  next login must include `captcha_id` + `captcha_answer` (see `GET /api/auth/captcha`).
 * 400 `validation_error` (`fields.identifier` / `fields.password`), 400 `csrf_failed`.
+
+Passwords are hashed with **Argon2id** (OWASP profile). A legacy werkzeug hash still verifies and is replaced by an
+Argon2id hash at the next successful login. The session stores the account's `session_version`; a password change,
+password reset or deactivation increments it, so every other session of that user is rejected (reported as
+anonymous) from then on. There is no passkey / WebAuthn sign-in.
+
+## `POST /api/auth/admin-login`
+Public. Body `{"identifier": "<email>", "password": "..."}`; same response, throttling and errors as
+`/api/auth/login` but only an **active admin** account can sign in here (the password is always verified; failures
+are `401 invalid_credentials`).
+
+## `POST /api/auth/admin-invite/inspect`
+Public. Body `{"token": "<token from the invitation link>"}` (a POST, so the token never appears in a URL).
+200 `{"email": "second@college.edu", "full_name": "Second Admin" | null, "expires_at": "..."}`, `Cache-Control: no-store`.
+An unknown, expired, revoked or already used token answers 400 with
+`"This invitation link is invalid or has expired. Ask the primary administrator to send a new one."`; repeated bad
+tokens from one IP are throttled (429 `rate_limited`).
+
+## `POST /api/auth/admin-invite/accept`  (201)
+Public. Body `{"token": "...", "full_name": "...", "password": "...", "confirm_password": "..."}` (`full_name` may be
+omitted when the inviter supplied one). Atomically consumes the single-use invitation and creates an **active ADMIN**
+account in one transaction. The user is *not* signed in: 201 `{"ok": true, "message": "Your administrator account is
+ready. Please sign in."}`; then use `/api/auth/admin-login`. Errors: 400 `validation_error` (`fields.password`,
+`fields.confirm_password`, `fields.full_name`), 400 for an invalid/used/expired token, 429 when throttled.
+Invitations are created by the primary admin, see [admin.md](admin.md).
 
 ## `POST /api/auth/logout`
 Public (idempotent). No body. 200 `{"ok": true, "message": "You have been signed out.", "csrf_token": "new-token"}`.
@@ -55,6 +83,7 @@ Public, one step (no e-mail OTP). Body:
 ```
 `section_id` comes from `GET /api/academic/tree`. Success **201** `{"ok": true, "message": "Registration successful. Please sign in."}`
 (the user is *not* logged in). The captcha is checked **first**, so accounts cannot be probed without solving one.
+Public signup cannot claim the primary admin's e-mail or any e-mail with a pending admin invitation (409 `conflict`). A class that is not listed may be typed in via `custom_class`; it is stored unverified (`is_verified=0`) and hidden from the public pickers until an admin verifies it. Registration is atomic.
 Errors: 400 `validation_error` with `fields` (`captcha`, `full_name`, `usn`, `section_id`, `phone`, `personal_email`,
 `college_email`, `password`, `confirm_password`), 409 `conflict` (USN or e-mail taken; `fields.usn` /
 `fields.college_email`). Unknown extra fields are rejected with 400.

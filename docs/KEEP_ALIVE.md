@@ -3,16 +3,17 @@
 ## What was added
 `GET /health` (and `HEAD`) in `api/routers/system.py` returns `200 {"status":"ok"}`.
 It touches nothing: no database, no disk, no session cookie, no network, no auth, so it costs almost no CPU,
-RAM or bandwidth. `/healthz` (the Render readiness probe, runs `SELECT 1`) is unchanged.
+RAM or bandwidth. `/healthz` (the Render health check) is also database-free; `/healthz?deep=1` is the variant that checks the database.
 No scheduler, worker or dependency was added; cron-job.org is the only thing that sends the periodic request.
 
 > Reality check. A ping every 10 minutes keeps a free Render web service from idling out (the free tier
 > spins down after ~15 minutes without inbound traffic), but it does NOT guarantee 100% uptime. Render can
 > still restart, suspend or redeploy the service (maintenance, resource limits, monthly instance-hour
 > limits, failed deploys) and a missed or failed cron run lets it spin down. Cold start after a spin-down
-> takes tens of seconds. Also note `render.yaml` currently declares `plan: starter` with a persistent disk:
-> paid instances never spin down, so on that plan this ping is harmless but unnecessary. Free instances have
-> no persistent disk: the SQLite DB and uploads are wiped on every restart, whatever the pings do.
+> takes tens of seconds. `render.yaml` declares `plan: free`:
+> the service has no disk and no local state (data and uploads are in Neon PostgreSQL), so a restart or spin-down
+> loses nothing; the ping only avoids the cold start. Because `/health` does not touch the database it also does not
+> wake the Neon compute (which scales to zero after 5 min idle regardless).
 
 ## Configure cron-job.org (manual, ~2 minutes)
 cron-job.org's free plan allows intervals down to 1 minute ([FAQ](https://cron-job.org/faq/)), so

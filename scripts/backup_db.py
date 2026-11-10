@@ -1,58 +1,91 @@
-"""Consistent online backup of the SQLite database (safe while the app is running).
+"""Logical backup of the PostgreSQL database to one gzip-compressed JSON file (no pg_dump needed).
 
-Uses sqlite3's backup API, the same mechanism as the CLI's `.backup` command, so it needs no
-`sqlite3` binary and produces a single self-contained file (WAL contents included).
+    python scripts/backup_db.py --out backups/                    # backups/campusconnect-YYYYmmddTHHMMSSZ.json.gz
+    python scripts/backup_db.py --out backups/ --keep 14          # also prune all but the newest 14 backups
 
-    python scripts/backup_db.py                       # uses DATABASE_PATH, writes to BACKUP_DIR
-    python scripts/backup_db.py --keep 14 --dest /var/data/backups
-
-On Render (Shell tab of the web service):
-    python scripts/backup_db.py --dest /var/data/backups --keep 14
-
-Environment: DATABASE_PATH (default ./database.db), BACKUP_DIR (default ./backups).
+Uses DATABASE_URL (the DIRECT Neon connection) from the environment / .env, reads inside ONE repeatable-read
+snapshot (so the file is consistent while the app keeps running) and never prints a connection string.
+Includes uploaded files (table file_blobs, base64). Transient tables (login_attempts, captcha_challenges) are
+skipped. Restore with scripts/restore_db.py. Neon's own point-in-time restore (7 days on Free) is the primary
+safety net; this file is the portable second copy you can keep off-platform.
 """
 import argparse
+import base64
+import datetime as dt
+import glob
+import gzip
+import json
 import os
-import sqlite3
 import sys
-from datetime import datetime, timezone
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+import psycopg
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from api.settings import Settings  # noqa: E402
+
+SKIP = {"schema_migrations", "login_attempts", "captcha_challenges"}
+# Foreign-key order (parents first); unknown extra tables are appended alphabetically.
+ORDER = [
+    "users", "branches", "departments", "academic_years", "sections", "faculty", "students", "faculty_subjects",
+    "faculty_classes", "faculty_assignments", "faculty_assignment_requests", "supporting_relationships", "chats",
+    "messages", "admin_messages", "meeting_requests", "permission_requests", "notifications", "admin_invitations",
+    "file_blobs", "audit_log", "presence",
+]
+
+
+def ordered(tables):
+    known = [t for t in ORDER if t in tables]
+    return known + sorted(t for t in tables if t not in ORDER)
+
+
+def encode(value):
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {"__b64__": base64.b64encode(bytes(value)).decode("ascii")}
+    return value
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--db", default=os.environ.get("DATABASE_PATH", os.path.join(BASE_DIR, "database.db")))
-    parser.add_argument("--dest", default=os.environ.get("BACKUP_DIR", os.path.join(BASE_DIR, "backups")))
-    parser.add_argument("--keep", type=int, default=14, help="number of newest backups to keep (0 = keep all)")
-    args = parser.parse_args(argv)
-
-    if not os.path.isfile(args.db):
-        print(f"Database not found: {args.db}", file=sys.stderr)
-        return 1
-    os.makedirs(args.dest, exist_ok=True)
-
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    target = os.path.join(args.dest, f"campusconnect-{stamp}.db")
-
-    src = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True, timeout=30)
-    dst = sqlite3.connect(target)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--out", default="backups", help="output directory")
+    ap.add_argument("--keep", type=int, default=0, help="keep only the newest N backups in --out (0 = keep all)")
+    args = ap.parse_args(argv)
     try:
-        src.backup(dst)
-        check = dst.execute("PRAGMA integrity_check").fetchone()[0]
-    finally:
-        dst.close()
-        src.close()
-    if check != "ok":
-        print(f"Backup written to {target} but integrity_check reported: {check}", file=sys.stderr)
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=False)
+    except ImportError:
+        pass
+    url = Settings.from_env().database_url_direct
+    if not url:
+        print("DATABASE_URL is not set.")
         return 2
-    print(f"Backup OK: {target} ({os.path.getsize(target)} bytes)")
+    os.makedirs(args.out, exist_ok=True)
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = os.path.join(args.out, f"campusconnect-{stamp}.json.gz")
+    tmp = target + ".partial"
+
+    with psycopg.connect(url, connect_timeout=30) as conn:
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        version = conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
+        names = {r[0] for r in conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'")} - SKIP
+        dump = {"format": 1, "created_at": stamp, "schema_version": version, "tables": {}}
+        for table in ordered(names):
+            cur = conn.execute(f"SELECT * FROM {table}")
+            cols = [d.name for d in cur.description]
+            dump["tables"][table] = {"columns": cols, "rows": [[encode(v) for v in row] for row in cur.fetchall()]}
+    with gzip.open(tmp, "wt", encoding="utf-8") as f:
+        json.dump(dump, f)
+    os.replace(tmp, target)  # never leaves a half-written backup under the final name
+    total = sum(len(t["rows"]) for t in dump["tables"].values())
+    print(f"Backup written: {target} ({os.path.getsize(target)} bytes, {len(dump['tables'])} tables, {total} rows, "
+          f"schema v{version})")
 
     if args.keep > 0:
-        old = sorted(f for f in os.listdir(args.dest) if f.startswith("campusconnect-") and f.endswith(".db"))
-        for name in old[:-args.keep]:
-            os.remove(os.path.join(args.dest, name))
-            print(f"Pruned old backup: {name}")
+        files = sorted(glob.glob(os.path.join(args.out, "campusconnect-*.json.gz")))
+        for old in files[:-args.keep]:
+            os.remove(old)
+            print(f"Pruned {old}")
     return 0
 
 

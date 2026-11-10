@@ -49,3 +49,16 @@ graphify-out/
 .vscode/
 *.log
 database.db.corrupt-*
+
+# Cloudflare
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# E2E / backups / tooling output
+frontend/test-results/
+frontend/playwright-report/
+backups/
+.playwright-mcp/

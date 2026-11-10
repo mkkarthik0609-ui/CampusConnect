@@ -15,10 +15,14 @@ import { usePageTitle } from "@/hooks/usePageTitle";
 const PASSWORD_RULE = "At least 8 characters with an uppercase letter, a lowercase letter and a digit.";
 
 /** The token lives in the URL fragment (never sent to a server): read it once, then strip it from the address bar. */
+let capturedToken = "";
 function takeToken() {
-  const token = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("t") || "";
+  const fresh = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("t") || "";
   if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
-  return token;
+  // The component can mount more than once (Suspense, StrictMode); the hash is gone after the first read, so keep
+  // the token in memory (module scope, never persisted) instead of treating the second mount as "incomplete".
+  if (fresh) capturedToken = fresh;
+  return capturedToken;
 }
 
 export default function AdminInvite() {

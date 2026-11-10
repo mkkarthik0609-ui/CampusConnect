@@ -4,7 +4,7 @@ Requires a signed-in user (any role) and the `X-CSRFToken` header. See `auth.md`
 
 ## `POST /api/account/password`
 Body `{"current_password": "...", "new_password": "...", "confirm_password": "..."}`.
-Success 200 `{"ok": true, "message": "Your password has been changed."}`. The session stays signed in.
+Success 200 `{"ok": true, "message": "Your password has been changed."}`. This device stays signed in; **every other session of the account ends** (the account's `session_version` is bumped). The change is recorded in the audit log. The new password is stored as an Argon2id hash.
 
 Errors (400 `validation_error` unless noted; `fields` names the input):
 | situation | field | message |

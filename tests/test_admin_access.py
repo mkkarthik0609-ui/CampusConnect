@@ -344,3 +344,36 @@ def test_bootstrap_never_overwrites_an_existing_primary_password(app, monkeypatc
     with db_session(app.state.settings):
         assert auth_service.bootstrap_admin_from_env() == "exists"
     assert db_one(app, "SELECT password_hash FROM users WHERE email = ?", (ADMIN_EMAIL,))["password_hash"] == before
+
+
+# ---------------------------------------------------------------- hardening found by the security review
+
+def test_a_stranger_cannot_lock_the_owner_out_from_another_address(tmp_path):
+    app = create_app(make_settings(tmp_path, trust_proxy=True, trust_proxy_hops=1))
+    make_admin(app)
+    attacker = TestClient(app, headers={"X-Forwarded-For": "203.0.113.9"})
+    for _ in range(6):
+        api_post(attacker, ADMIN_URL, json={"identifier": ADMIN_EMAIL, "password": "guess"})
+    # the attacker's (account, address) pair is locked ...
+    assert api_post(attacker, ADMIN_URL, json={"identifier": ADMIN_EMAIL, "password": PASSWORD}).status_code == 429
+    # ... but the owner, from a different address, still signs in
+    owner = TestClient(app, headers={"X-Forwarded-For": "198.51.100.7"})
+    assert api_post(owner, ADMIN_URL, json={"identifier": ADMIN_EMAIL, "password": PASSWORD}).status_code == 200
+
+
+def test_an_expired_invitation_no_longer_reserves_the_address_for_signup(app, owner):
+    from tests.conftest import find_section, http_student_signup
+    invite(owner["client"], "later@college.edu")
+    sec = find_section(app=app)
+    assert http_student_signup(TestClient(app), None, "later@college.edu", "1AB21CS150", sec).status_code == 409
+    db_exec(app, "UPDATE admin_invitations SET expires_at = datetime('now', '-1 minute')")
+    assert http_student_signup(TestClient(app), None, "later@college.edu", "1AB21CS151", sec).status_code == 201
+    # ... and the (now pointless) invitation cannot be accepted any more
+    assert db_count(app, "users", "email = 'later@college.edu'") == 1
+
+
+def test_invitation_probing_does_not_feed_the_login_ip_lockout(app):
+    c = TestClient(app)
+    for _ in range(30):
+        api_post(c, "/api/auth/admin-invite/inspect", json={"token": "q" * 43})
+    assert db_count(app, "login_attempts", "ip IS NOT NULL AND identifier LIKE E'\x01admin-invite%'") == 0

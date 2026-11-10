@@ -151,7 +151,7 @@ def _find_valid(token, ip):
             "SELECT * FROM admin_invitations WHERE token_hash = ? AND status = 'PENDING' AND expires_at > ?",
             (_hash(token), sq.fmt(sq.utcnow()))).fetchone()
     if row is None:
-        sq.record_login_attempt(_THROTTLE_KEY + (ip or ""), ip, False)
+        sq.record_login_attempt(_THROTTLE_KEY + (ip or ""), None, False)  # not in the login IP counter
         raise InvitationError(INVALID_LINK)
     return row
 

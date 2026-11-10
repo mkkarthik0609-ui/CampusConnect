@@ -87,7 +87,7 @@ Unknown ids also give 403 (no existence oracle).
 Participant only. **Marks every incoming message of this chat as seen** (so the sender's messages flip to `seen` on their
 next fetch). Messages "deleted for me" by the viewer are omitted. Efficient polling (2.5 s while the tab is focused):
 send `after_id=<last_id>` and `updated_since=<server_time>` of the previous response; the response then contains the **new**
-messages (`id > after_id`) **and** older ones that changed at/after `updated_since` (ticks, edit, unsend): merge by `id`.
+messages (`id > after_id`) **and** older ones that changed at/after `updated_since` (ticks, edit, unsend): merge by `id`. Each response holds at most the **newest 300** matching messages (returned oldest first), so a first load of a very long thread is bounded.
 `updated_since` is an ISO-8601 timestamp (`2026-10-01T03:12:49Z`, any offset; `YYYY-MM-DD HH:MM:SS` UTC also works), 400 when malformed.
 ```json
 {
@@ -136,7 +136,7 @@ Errors: 400 (`Message cannot be empty.`, too long, `Attachments cannot be edited
 ## POST `/api/chat/messages/{message_id}/unsend`
 Instagram-style **Unsend for everyone**. No body. Only the sender, at any time (even after it was seen), while chat access exists.
 The message becomes a tombstone for both participants *and the admin viewer*: `is_unsent: true`, `unsent_at` set, `message_text` /
-`attachment` / `reply_to` gone, the stored text is wiped and the uploaded file is **deleted from disk** (its URL 404s). It can no longer be
+`attachment` / `reply_to` gone, the stored text is wiped and the uploaded file is **deleted from storage** (its URL 404s). It can no longer be
 edited, and replies that quoted it show `reply_to.unsent: true` without the text. The chat list shows `You unsent a message` /
 `<Name> unsent a message`. **Idempotent**: unsending again returns 200 with the tombstone.
 

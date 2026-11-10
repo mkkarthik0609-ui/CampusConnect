@@ -75,13 +75,14 @@ class Settings:
     database_url: str = ""
     database_url_direct: str = ""
     db_pool_min: int = 0
-    db_pool_max: int = 5          # Render Free is 512 MB; Neon pooler multiplexes the rest
+    db_pool_max: int = 10         # a psycopg connection is a few MB; Neon's pooler multiplexes the rest
     db_pool_timeout: float = 15.0  # seconds to wait for a free pooled connection
     db_connect_timeout: int = 15   # seconds; covers a Neon compute waking from scale-to-zero
     db_connect_retries: int = 4
     frontend_dist: str = os.path.join(BASE_DIR, "frontend", "dist")
 
     max_request_bytes: int = 10 * 1024 * 1024  # 10 MB hard cap per request
+    body_read_timeout: float = 30.0  # seconds a client may take to send a request body (slowloris guard)
     max_chat_attachment_size: int = 8 * 1024 * 1024
     max_profile_picture_size: int = 3 * 1024 * 1024
     allowed_chat_extensions: frozenset = frozenset({"pdf", "png", "jpg", "jpeg", "docx"})

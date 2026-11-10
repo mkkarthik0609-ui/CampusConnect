@@ -158,35 +158,60 @@ Errors: `404 not_found`, `409 conflict` (`"This request has already been reviewe
 `{"items": [...], "total": n}`, oldest first:
 ```json
 { "id": 1, "full_name": "Admin One", "email": "admin@college.edu", "profile_picture_url": null,
-  "is_active": true, "is_you": true, "is_primary": true, "passkey_count": 0, "created_at": "...", "last_login_at": "..." }
+  "is_active": true, "is_you": true, "is_primary": true, "created_at": "...", "last_login_at": "..." }
 ```
-Every admin may read this list. **Only the primary admin** (`PRIMARY_ADMIN_EMAIL`) may create, deactivate or
-reset admins or revoke their passkeys; any other admin gets 403 `forbidden`. The primary admin is itself protected:
-it cannot be deactivated, have its password reset or its passkeys revoked (400 `validation_error`).
+Every admin may read this list. **Only the primary admin** (`PRIMARY_ADMIN_EMAIL`) may invite admins, manage
+invitations or deactivate/reactivate admins; any other admin gets 403 `forbidden`. The primary admin is itself
+protected: it cannot be deactivated or deleted (400 `validation_error`), and public signup cannot claim its e-mail
+or any e-mail with a pending invitation. There are **no temporary passwords** and no admin password reset
+endpoint; admins are created only through invitations (below).
 
-### `POST /api/admin/admins`  (201)
-Body (both required, unknown keys such as `password` rejected): `{ "full_name": "Second Admin", "email": "second@college.edu" }`.
-The e-mail is lower-cased. The server generates a strong temporary password.
-201 `{"ok": true, "message": "...", "admin": { ...admin item... }, "temporary_password": "..."}` - the password is
-returned **once** and never stored in clear text; the new admin signs in with it on the admin login page.
-Errors: 400 `validation_error` (`fields.full_name` / `fields.email`); `409 conflict` with `fields.email` when the
-e-mail is already used by any account (case-insensitive).
+### Admin invitations (primary admin only)
+
+| Endpoint | Effect |
+|---|---|
+| `GET /api/admin/admin-invitations` | `{items, total}`, newest first, at most 200 |
+| `POST /api/admin/admin-invitations` (201) | create an invitation |
+| `POST /api/admin/admin-invitations/{id}/resend` | rotate the token (the previously e-mailed link stops working), extend expiry, send again. 60 s cooldown after the last send |
+| `DELETE /api/admin/admin-invitations/{id}` | revoke a pending invitation |
+
+`POST` body (unknown keys rejected): `{ "email": "second@college.edu", "full_name": "Second Admin" }`
+(`email` required, `full_name` optional, max 120). Errors: 400 `validation_error` (`fields.email`),
+`409 conflict` (`fields.email`) when an account with that e-mail exists or a non-expired invitation for it is pending.
+
+Invitation item:
+```json
+{ "id": 3, "email": "second@college.edu", "full_name": "Second Admin", "status": "PENDING",
+  "created_at": "...", "expires_at": "...", "last_sent_at": "...", "send_count": 1,
+  "delivery_status": "SENT", "accepted_at": null }
+```
+`status` is `PENDING`, `ACCEPTED`, `REVOKED` or `EXPIRED` (a `PENDING` row past `expires_at`).
+`delivery_status` is `NOT_SENT`, `SENT`, `FAILED` or `NOT_CONFIGURED`.
+
+`POST` (create) and `POST .../resend` answer `{"ok": true, "message": "...", "invitation": {...},
+"email_delivery": "SENT" | "FAILED" | "NOT_CONFIGURED", "invite_link": <string | null>}`.
+**`invite_link` is only present when the e-mail was not delivered** (`FAILED` / `NOT_CONFIGURED`), so the primary
+admin can pass it on by hand; it is shown once and never stored or logged. Delivery is never claimed when it did
+not happen: without `RESEND_API_KEY` / `MAIL_FROM` the answer is `email_delivery: "NOT_CONFIGURED"`. Resend limits:
+100 mails/day on the free tier; the sender must be on a verified domain (except the account owner's own address).
+
+Token: 256-bit random, only its SHA-256 is stored, valid `INVITE_TTL_HOURS` (default 72), single use (atomic
+`UPDATE ... WHERE status='PENDING'`). The link is `PUBLIC_APP_URL/admin-invite#t=<token>`: the token sits in the URL
+fragment, so it never reaches server logs. The invitee opens it and uses the public endpoints
+`POST /api/auth/admin-invite/inspect` and `POST /api/auth/admin-invite/accept` (see [auth.md](auth.md)).
+Resend/revoke of a non-pending invitation, or an unknown id, answers 400 `validation_error`; the resend cooldown
+answers 400 as well.
 
 ### Managing admins
 | Endpoint | Effect |
 |---|---|
-| `POST /api/admin/admins/{id}/active` `{"active": bool}` | deactivate / reactivate -> `{ok, message, admin}`. You cannot deactivate yourself or the primary admin. A deactivated admin's sessions end and sign-in is refused. |
-| `POST /api/admin/admins/{id}/reset-password` | new temporary password -> `{ok, message, temporary_password}` (shown once; lifts a sign-in lockout) |
-| `DELETE /api/admin/admins/{id}/passkeys` | revoke all of that admin's passkeys -> `{ok, message, removed}` |
+| `POST /api/admin/admins/{id}/active` `{"active": bool}` | deactivate / reactivate -> `{ok, message, admin}`. You cannot deactivate yourself or the primary admin. Deactivation bumps the account's `session_version`, which ends all its sessions, and sign-in is refused. |
 
-### Passkeys (WebAuthn) - the signed-in admin's own
-`GET /api/admin/passkeys` -> `{items: [{id, label, transports, created_at, last_used_at}], total}`.
-`POST /api/admin/passkeys/options` -> `{options}` (discoverable credential creation options; the browser `Origin`
-must be listed in `WEBAUTHN_ALLOWED_ORIGINS`, else 400). `POST /api/admin/passkeys/verify` `{credential, label?}` -> 201
-`{ok, id}`. `DELETE /api/admin/passkeys/{id}` removes one of your own (404 otherwise). At most 10 per admin.
-Sign-in: `POST /api/auth/admin-passkey/options` (no body) -> `{options}`; `POST /api/auth/admin-passkey/verify`
-`{credential, identifier?}` -> same response as `POST /api/auth/admin-login`. The challenge lives in the signed
-session (5 minutes, single use); failures are throttled like password sign-ins.
+Invitations and (de)activations are written to the audit trail (table `audit_log`: actor, action such as
+`admin_invite.create` / `admin.deactivate`, target, IP, time).
+
+Removed: `POST /api/admin/admins` (temporary passwords), `POST /api/admin/admins/{id}/reset-password` and every
+passkey endpoint (`/api/admin/passkeys*`, `/api/auth/admin-passkey/*`, `DELETE /api/admin/admins/{id}/passkeys`).
 
 ## Error codes used by `/api/admin`
 

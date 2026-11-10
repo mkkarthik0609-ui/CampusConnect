@@ -169,7 +169,8 @@ class Connection:
 
     def execute(self, sql: str, params=()) -> Cursor:
         text, wants = translate(sql)
-        bound = params if isinstance(params, dict) else (tuple(params) if params else None)
+        # () (not None) so psycopg always processes the placeholders and un-doubles literal "%%"
+        bound = params if isinstance(params, dict) else (tuple(params) if params else ())
         cur = self._raw.execute(text, bound)
         return Cursor(cur, wants)
 
@@ -197,6 +198,11 @@ class Connection:
         else:
             self._depth -= 1
             if self._depth == 0:
+                if self._raw.info.transaction_status == psycopg.pq.TransactionStatus.INERROR:
+                    # A swallowed database error aborted the transaction; committing would silently roll it back
+                    # while the caller believes it succeeded.
+                    self._raw.rollback()
+                    raise RuntimeError("transaction was aborted by an earlier database error")
                 self._raw.commit()
 
     def rollback(self) -> None:
@@ -287,16 +293,20 @@ class _Holder:
         conn, pool = self.conn, self.pool
         self.conn = self.pool = None
         if conn is not None and pool is not None:
+            raw = conn.raw
             try:
-                raw = conn.raw
                 if not raw.closed and raw.info.transaction_status != psycopg.pq.TransactionStatus.IDLE:
                     raw.rollback()  # nothing uncommitted may leak into the next request that reuses the connection
                 for sql, params in self.after_close:  # deferred autonomous writes (e.g. presence), own transaction
                     raw.execute(sql, params)
                     raw.commit()
-                pool.putconn(raw)
-            except Exception:  # noqa: BLE001  pragma: no cover
-                log.exception("failed to return database connection to pool")
+            except Exception:  # noqa: BLE001
+                log.warning("cleanup before returning a database connection failed", exc_info=True)
+            finally:
+                try:
+                    pool.putconn(raw)  # ALWAYS give the slot back; the pool discards a broken connection itself
+                except Exception:  # noqa: BLE001  pragma: no cover
+                    log.exception("failed to return database connection to pool")
 
 
 _holder_var: contextvars.ContextVar = contextvars.ContextVar("cc_db_holder", default=None)

@@ -9,8 +9,20 @@ permissions:
 
 jobs:
   backend:
-    name: Backend tests (Python 3.12)
+    name: Backend tests (Python 3.12 + PostgreSQL 16)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # A throw-away server: the suite creates and drops its own cc_test_* databases.
+      TEST_DATABASE_ADMIN_URL: postgresql://postgres:ci@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,10 +33,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Run tests
-        run: pytest -q
+        run: pytest -q -n 2 --timeout=180
+      - name: Dependency audit (runtime requirements)
+        run: pip install pip-audit && pip-audit -r requirements.txt
 
   frontend:
-    name: Frontend lint and build (Node 24)
+    name: Frontend lint, build and audit (Node 24)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -42,3 +56,5 @@ jobs:
         run: npm run lint
       - name: Build
         run: npm run build
+      - name: Audit shipped dependencies
+        run: npm audit --omit=dev

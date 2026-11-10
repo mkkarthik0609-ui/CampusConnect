@@ -158,23 +158,30 @@ def get_tree(active_only=True, with_usage=False):
             node["can_delete"] = not node["student_count"] and not node["assignment_count"]
         return node
 
+    def hidden(row):  # public pickers: inactive or not-yet-verified (typed-in) levels are not offered
+        return active_only and (not row["is_active"] or not row["is_verified"])
+
     tree = []
     for b in aq.list_branches():
-        if active_only and not b["is_active"]:
+        if hidden(b):
             continue
-        b_node = {"id": b["id"], "name": b["name"], "is_active": bool(b["is_active"]), "departments": []}
+        b_node = {"id": b["id"], "name": b["name"], "is_active": bool(b["is_active"]),
+                  "is_verified": bool(b["is_verified"]), "departments": []}
         for d in aq.list_departments(b["id"]):
-            if active_only and not d["is_active"]:
+            if hidden(d):
                 continue
-            d_node = {"id": d["id"], "name": d["name"], "is_active": bool(d["is_active"]), "years": []}
+            d_node = {"id": d["id"], "name": d["name"], "is_active": bool(d["is_active"]),
+                      "is_verified": bool(d["is_verified"]), "years": []}
             for y in aq.list_years(d["id"]):
-                if active_only and not y["is_active"]:
+                if hidden(y):
                     continue
-                y_node = {"id": y["id"], "name": y["name"], "is_active": bool(y["is_active"]), "sections": []}
+                y_node = {"id": y["id"], "name": y["name"], "is_active": bool(y["is_active"]),
+                          "is_verified": bool(y["is_verified"]), "sections": []}
                 for s in aq.list_sections(y["id"]):
-                    if active_only and not s["is_active"]:
+                    if hidden(s):
                         continue
-                    s_node = {"id": s["id"], "name": s["name"], "is_active": bool(s["is_active"])}
+                    s_node = {"id": s["id"], "name": s["name"], "is_active": bool(s["is_active"]),
+                              "is_verified": bool(s["is_verified"])}
                     if with_usage:
                         counts = usage.get(s["id"], (0, 0))
                         s_node["student_count"], s_node["assignment_count"] = counts
@@ -213,14 +220,17 @@ def ensure_class(branch, department, year, section):
     def find(rows, name):
         return next((r for r in rows if r["name"].lower() == name.lower()), None)
 
+    # Anything created here came from a typed entry, so it is stored UNVERIFIED: it works for the person who typed
+    # it (and anyone typing the same names) but stays out of the public pickers until an admin verifies it. Typed
+    # text can therefore never alter the official structure students and faculty browse.
     b = find(aq.list_branches(), branch_name)
-    b_id = b["id"] if b else aq.create_branch(branch_name)
+    b_id = b["id"] if b else aq.create_branch(branch_name, verified=False)
     d = find(aq.list_departments(b_id), dept_name) if b else None
-    d_id = d["id"] if d else aq.create_department(b_id, dept_name)
+    d_id = d["id"] if d else aq.create_department(b_id, dept_name, verified=False)
     y = find(aq.list_years(d_id), year_name) if d else None
-    y_id = y["id"] if y else aq.create_year(d_id, year_name, year_no)
+    y_id = y["id"] if y else aq.create_year(d_id, year_name, year_no, verified=False)
     s = find(aq.list_sections(y_id), sec_name) if y else None
-    s_id = s["id"] if s else aq.create_section(y_id, sec_name)
+    s_id = s["id"] if s else aq.create_section(y_id, sec_name, verified=False)
     return resolve_section(s_id)  # raises if any level was deactivated by Admin
 
 
@@ -284,6 +294,12 @@ def add_sections(year_id, text):
 _LEVEL_GETTERS = {
     "branch": aq.get_branch, "department": aq.get_department, "year": aq.get_year, "section": aq.get_section,
 }
+
+
+def set_verified(level, row_id):
+    if level not in _LEVEL_GETTERS or not _LEVEL_GETTERS[level](row_id):
+        raise AcademicError("Item not found.")
+    aq.set_level_verified(level, row_id)
 
 
 def set_active(level, row_id, active):

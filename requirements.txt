@@ -3,12 +3,12 @@ fastapi==0.142.2
 uvicorn[standard]==0.54.0
 python-multipart==0.0.32
 itsdangerous==2.2.0
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 APScheduler==3.10.4
 # Werkzeug is used standalone: legacy password-hash verification + secure_filename.
-Werkzeug==3.0.4
-Pillow==12.3.0
+Werkzeug==3.1.9
+Pillow==13.0.0
 # PostgreSQL (Neon): psycopg 3 + pool; binary wheels need no libpq on Render.
-psycopg[binary,pool]>=3.2.13,<4
+psycopg[binary,pool]==3.3.8
 # Password hashing: Argon2id.
-argon2-cffi>=25.1.0,<26
+argon2-cffi==25.1.0

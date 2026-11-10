@@ -1,4 +1,5 @@
 import json
+from api.db import get_db
 from models import queries
 from models import academic_queries as aq
 from services import notification_service as notif
@@ -91,25 +92,32 @@ def decide_permission_request(request_id, approver_user_id, approve: bool):
             raise PermissionError_("Only an admin may review faculty change requests.")
 
     new_status = "APPROVED" if approve else "REJECTED"
-    queries.decide_permission_request(request_id, new_status)
+    with get_db().transaction():  # decision + applied change + notification: all or nothing
+        if not queries.decide_permission_request(request_id, new_status):
+            raise PermissionError_("This request has already been reviewed.")
+        if approve:
+            changes = json.loads(request_row["requested_changes"])
+            # Defence in depth: column names are interpolated by update_*_fields, so only ever apply
+            # allow-listed fields even if the stored JSON was tampered with.
+            allowed = (STUDENT_EDITABLE_FIELDS if request_row["request_type"] == STUDENT_PROFILE_CHANGE
+                       else FACULTY_EDITABLE_FIELDS)
+            changes = {k: v for k, v in changes.items() if k in allowed}
+            if request_row["request_type"] == STUDENT_PROFILE_CHANGE:
+                student = queries.get_student_by_user_id(request_row["requester_user_id"])
+                queries.update_student_fields(student["id"], changes)
+            else:
+                faculty = queries.get_faculty_by_user_id(request_row["requester_user_id"])
+                new_email = changes.get("professional_email")
+                if new_email:
+                    holder = queries.get_user_by_email(new_email)
+                    if holder and holder["id"] != faculty["user_id"]:
+                        raise PermissionError_("That email address is already in use, so the change cannot be applied.")
+                queries.update_faculty_fields(faculty["id"], changes)
 
-    if approve:
-        changes = json.loads(request_row["requested_changes"])
-        # Defence in depth: column names are interpolated by update_*_fields, so only ever apply
-        # allow-listed fields even if the stored JSON was tampered with.
-        allowed = STUDENT_EDITABLE_FIELDS if request_row["request_type"] == STUDENT_PROFILE_CHANGE else FACULTY_EDITABLE_FIELDS
-        changes = {k: v for k, v in changes.items() if k in allowed}
-        if request_row["request_type"] == STUDENT_PROFILE_CHANGE:
-            student = queries.get_student_by_user_id(request_row["requester_user_id"])
-            queries.update_student_fields(student["id"], changes)
-        else:
-            faculty = queries.get_faculty_by_user_id(request_row["requester_user_id"])
-            queries.update_faculty_fields(faculty["id"], changes)
-
-    notif.notify(
-        request_row["requester_user_id"], notif.PERMISSION_RESPONDED,
-        f"Profile change request {new_status.lower()}",
-        f"Your profile change request was {new_status.lower()}.",
-        "permission_request", request_id,
-    )
+        notif.notify(
+            request_row["requester_user_id"], notif.PERMISSION_RESPONDED,
+            f"Profile change request {new_status.lower()}",
+            f"Your profile change request was {new_status.lower()}.",
+            "permission_request", request_id,
+        )
     return new_status

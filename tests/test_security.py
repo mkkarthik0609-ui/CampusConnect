@@ -673,7 +673,7 @@ def test_healthz_reports_503_when_database_is_down(client, monkeypatch):
     def broken():
         raise RuntimeError("db down")
     monkeypatch.setattr("api.routers.system.get_db", broken)
-    resp = client.get("/healthz")
+    resp = client.get("/healthz?deep=1")
     assert resp.status_code == 503 and resp.json() == {"status": "error"}
 
 
@@ -1063,3 +1063,35 @@ def test_notification_mark_read_only_affects_own(app, client):
     assert db_one(app, "SELECT is_read FROM notifications WHERE id = ?", (nid,))["is_read"] == 0
     api_post(client, "/api/notifications/read-all")
     assert db_one(app, "SELECT is_read FROM notifications WHERE id = ?", (nid,))["is_read"] == 0
+
+
+def test_images_with_absurd_dimensions_are_refused(app):
+    import io
+    from PIL import Image
+    from services import file_service
+    buf = io.BytesIO()
+    Image.new("1", (6000, 6000)).save(buf, "PNG")  # 36 M pixels, tiny file: a decompression bomb
+    with db_session(app.state.settings):
+        with pytest.raises(file_service.FileValidationError):
+            file_service.save_profile_picture(_Upload("bomb.png", buf.getvalue()), "STUDENT")
+
+
+def test_a_client_that_never_finishes_its_body_gets_408_and_holds_no_slot(app):
+    import asyncio
+    from api.security import _buffer_body
+
+    async def scenario():
+        sent = []
+
+        async def receive():
+            await asyncio.sleep(5)  # the body never completes
+            return {"type": "http.request", "body": b"x", "more_body": True}
+
+        async def send(message):
+            sent.append(message)
+
+        result = await _buffer_body(receive, send, {"type": "http", "method": "POST", "path": "/api/x"}, 0.2)
+        return result, sent
+
+    result, sent = asyncio.run(scenario())
+    assert result is None and sent[0]["status"] == 408

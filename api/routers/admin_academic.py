@@ -139,6 +139,13 @@ def set_active(level: str, row_id: int, body: ActiveIn):
     return ok(message, level=level, id=row_id, is_active=body.active)
 
 
+@router.post("/academics/{level}/{row_id}/verify")
+def verify_level(level: str, row_id: int):
+    """Accept a class level a student / faculty member typed in: it then appears in the public pickers."""
+    _structure("verify", academic_service.set_verified, level, row_id)
+    return ok(f"{LEVEL_LABELS[level]} verified.", level=level, id=row_id, is_verified=True)
+
+
 @router.delete("/academics/{level}/{row_id}")
 def delete_item(level: str, row_id: int):
     """Only an unused item (no students, no faculty assignments - active or not) can be deleted."""

@@ -45,6 +45,15 @@ def count_recent_failures_for_identifier(identifier, window_minutes):
     return row["c"]
 
 
+def count_recent_failures_for_identifier_ip(identifier, ip, window_minutes):
+    since = fmt(utcnow() - timedelta(minutes=window_minutes))
+    row = get_db().execute(
+        "SELECT COUNT(*) AS c FROM login_attempts WHERE identifier = ? AND ip = ? AND success = 0 AND created_at >= ?",
+        (identifier, ip, since),
+    ).fetchone()
+    return row["c"]
+
+
 def count_recent_failures_for_ip(ip, window_minutes):
     if not ip:
         return 0

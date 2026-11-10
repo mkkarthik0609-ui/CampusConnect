@@ -179,8 +179,15 @@ def update_faculty_fields(faculty_id, fields: dict):
     db = get_db()
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     params = list(fields.values()) + [faculty_id]
-    db.execute(f"UPDATE faculty SET {set_clause}, updated_at = datetime('now') WHERE id = ?", params)
-    db.commit()
+    with db.transaction():
+        db.execute(f"UPDATE faculty SET {set_clause}, updated_at = datetime('now') WHERE id = ?", params)
+        if "professional_email" in fields:
+            # The professional e-mail IS the login e-mail: keep users.email in the same transaction so the two
+            # tables can never disagree (a half-applied change would lock the faculty member out).
+            db.execute(
+                "UPDATE users SET email = ?, updated_at = datetime('now') "
+                "WHERE id = (SELECT user_id FROM faculty WHERE id = ?)",
+                (fields["professional_email"], faculty_id))
 
 
 def add_faculty_subject(faculty_id, subject_name):
@@ -451,11 +458,14 @@ def get_or_create_chat(student_id, faculty_id):
     ).fetchone()
     if row:
         return row
-    cur = db.execute(
-        "INSERT INTO chats (student_id, faculty_id) VALUES (?, ?)", (student_id, faculty_id)
+    # Two simultaneous first messages must end up in ONE chat: let the UNIQUE(student_id, faculty_id) decide.
+    db.execute(
+        "INSERT INTO chats (student_id, faculty_id) VALUES (?, ?) ON CONFLICT (student_id, faculty_id) DO NOTHING",
+        (student_id, faculty_id),
     )
     db.commit()
-    return db.execute("SELECT * FROM chats WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return db.execute(
+        "SELECT * FROM chats WHERE student_id = ? AND faculty_id = ?", (student_id, faculty_id)).fetchone()
 
 
 def get_chat_by_id(chat_id):
@@ -492,19 +502,28 @@ def get_messages_by_ids(table, ids):
     return {r["id"]: r for r in rows}
 
 
+THREAD_PAGE = 300  # newest messages returned per thread request
+ADMIN_LIST_CAP = 2000  # hard ceiling for admin "list everything" views
+
+
 def list_thread_messages(table, scope_sql, params, viewer_user_id, after_id=0, since=None):
     """Messages of one conversation the viewer may see (oldest first): new ones (id > after_id) plus, when
     ``since`` ('YYYY-MM-DD HH:MM:SS' UTC) is given, older ones that changed at/after it (status, edit, unsend)."""
+    # Bounded: a first load (or a very long thread) returns only the newest THREAD_PAGE messages, never the whole
+    # history; the client keeps its older messages and only asks for what is newer / changed.
     return get_db().execute(
-        f"""SELECT * FROM {_table(table)} m WHERE ({scope_sql}) AND (m.id > :after OR m.updated_at >= :since)
-              AND {visible_sql("m")} ORDER BY m.created_at ASC, m.id ASC""",
+        f"""SELECT * FROM (
+                SELECT * FROM {_table(table)} m WHERE ({scope_sql}) AND (m.id > :after OR m.updated_at >= :since)
+                  AND {visible_sql("m")} ORDER BY m.created_at DESC, m.id DESC LIMIT {THREAD_PAGE}
+            ) newest ORDER BY created_at ASC, id ASC""",
         {**params, "v": viewer_user_id, "after": after_id or 0, "since": since},
     ).fetchall()
 
 
 def list_messages_for_chat(chat_id):
     return get_db().execute(
-        "SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at ASC", (chat_id,)
+        "SELECT * FROM (SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at DESC, id DESC LIMIT ?) n "
+        "ORDER BY created_at ASC, id ASC", (chat_id, THREAD_PAGE)
     ).fetchall()
 
 
@@ -629,38 +648,57 @@ def get_meeting_by_id(meeting_id):
 
 
 def respond_meeting_request(meeting_id, status, faculty_response, meeting_time_text):
+    """Atomic PENDING -> ACCEPTED/REJECTED; False when somebody else changed the status first."""
     db = get_db()
-    db.execute(
+    cur = db.execute(
         """UPDATE meeting_requests
            SET status = ?, faculty_response = ?, meeting_time_text = ?, responded_at = datetime('now'),
                updated_at = datetime('now')
-           WHERE id = ?""",
+           WHERE id = ? AND status = 'PENDING'""",
         (status, faculty_response, meeting_time_text, meeting_id),
     )
     db.commit()
+    return cur.rowcount == 1
 
 
 def cancel_meeting_request(meeting_id, cancelled_by, reason):
+    """Atomic PENDING/ACCEPTED -> CANCELLED; False when the status already moved on."""
     db = get_db()
-    db.execute(
+    cur = db.execute(
         """UPDATE meeting_requests
            SET status = 'CANCELLED', cancelled_by = ?, cancellation_reason = ?,
                cancelled_at = datetime('now'), updated_at = datetime('now')
-           WHERE id = ?""",
+           WHERE id = ? AND status IN ('PENDING', 'ACCEPTED')""",
         (cancelled_by, reason, meeting_id),
     )
     db.commit()
+    return cur.rowcount == 1
 
 
 def complete_meeting_request(meeting_id, completed_by):
+    """Atomic ACCEPTED -> COMPLETED; False when the status already moved on."""
     db = get_db()
-    db.execute(
+    cur = db.execute(
         """UPDATE meeting_requests
            SET status = 'COMPLETED', completed_by = ?, completed_at = datetime('now'), updated_at = datetime('now')
-           WHERE id = ?""",
+           WHERE id = ? AND status = 'ACCEPTED'""",
         (completed_by, meeting_id),
     )
     db.commit()
+    return cur.rowcount == 1
+
+
+def claim_meeting_reminder(meeting_id, older_than):
+    """Atomically take the right to remind about a still-open meeting: stamps last_reminder_at only when it is
+    unset or not newer than ``older_than``. True for exactly one caller, however many schedulers/instances race."""
+    db = get_db()
+    cur = db.execute(
+        """UPDATE meeting_requests SET last_reminder_at = datetime('now')
+           WHERE id = ? AND status IN ('PENDING', 'ACCEPTED')
+             AND (last_reminder_at IS NULL OR last_reminder_at <= ?)""",
+        (meeting_id, older_than),
+    )
+    return cur.rowcount == 1
 
 
 def update_meeting_reminder_time(meeting_id):
@@ -722,7 +760,7 @@ def list_all_meetings_admin():
            FROM meeting_requests mr
            JOIN students s ON s.id = mr.student_id JOIN users su ON su.id = s.user_id
            JOIN faculty f ON f.id = mr.faculty_id JOIN users fu ON fu.id = f.user_id
-           ORDER BY mr.requested_at DESC"""
+           ORDER BY mr.requested_at DESC LIMIT 2000"""
     ).fetchall()
 
 
@@ -817,12 +855,14 @@ def list_permission_requests_by_requester(requester_user_id):
 
 
 def decide_permission_request(request_id, status):
+    """Atomic PENDING -> APPROVED/REJECTED; False when another reviewer decided first."""
     db = get_db()
-    db.execute(
-        "UPDATE permission_requests SET status = ?, reviewed_at = datetime('now') WHERE id = ?",
+    cur = db.execute(
+        "UPDATE permission_requests SET status = ?, reviewed_at = datetime('now') WHERE id = ? AND status = 'PENDING'",
         (status, request_id),
     )
     db.commit()
+    return cur.rowcount == 1
 
 
 def list_all_permission_requests_admin():
@@ -831,7 +871,7 @@ def list_all_permission_requests_admin():
            FROM permission_requests pr
            JOIN users ru ON ru.id = pr.requester_user_id
            JOIN users au ON au.id = pr.target_approver_user_id
-           ORDER BY pr.created_at DESC"""
+           ORDER BY pr.created_at DESC LIMIT 2000"""
     ).fetchall()
 
 
@@ -840,14 +880,14 @@ def list_all_permission_requests_admin():
 def list_all_students_admin():
     return get_db().execute(
         """SELECT s.*, u.full_name, u.email, u.profile_picture_path
-           FROM students s JOIN users u ON u.id = s.user_id ORDER BY u.full_name"""
+           FROM students s JOIN users u ON u.id = s.user_id ORDER BY u.full_name LIMIT 2000"""
     ).fetchall()
 
 
 def list_all_faculty_admin():
     return get_db().execute(
         """SELECT f.*, u.full_name, u.email, u.profile_picture_path
-           FROM faculty f JOIN users u ON u.id = f.user_id ORDER BY u.full_name"""
+           FROM faculty f JOIN users u ON u.id = f.user_id ORDER BY u.full_name LIMIT 2000"""
     ).fetchall()
 
 

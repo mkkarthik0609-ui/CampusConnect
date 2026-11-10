@@ -3,7 +3,7 @@
 
 **Version:** 1.0  
 **Project Type:** College Python Web Application  
-**Primary Stack:** Python + FastAPI + SQLite (backend); React + Vite + Tailwind (frontend)
+**Primary Stack:** Python + FastAPI + PostgreSQL (Neon) (backend); React + Vite + Tailwind (frontend); Vercel + Render Free + Neon Free hosting
 
 ---
 
@@ -125,7 +125,7 @@ An admin can:
 - Add new admins.
 - Monitor the application.
 
-There is **no public admin signup**. Admin accounts are created by an authorized existing admin/setup process.
+There is **no public admin signup**. The primary admin (`PRIMARY_ADMIN_EMAIL`) is created by the setup process (bootstrap from environment variables, only if absent). Further admins are invited by the primary admin only, through a single-use, expiring e-mail link; the invitee chooses their own password (no temporary passwords).
 
 ---
 
@@ -168,7 +168,7 @@ The exact faculty onboarding approval flow may be implemented according to the f
 ### Login
 Users log in with their Campus Connect credentials.
 
-Passwords must be stored as secure password hashes, never as plain text.
+Passwords must be stored as secure password hashes (Argon2id), never as plain text. Sign-in is by e-mail/password only; passkeys are not supported.
 
 ---
 
@@ -475,10 +475,9 @@ Students and faculty can:
 - Take a new picture using a camera where supported
 
 Profile pictures are visible according to normal application access rules.
-
-Suggested server storage:
-- `uploads/profile/students/`
-- `uploads/profile/faculty/`
+Storage: because the Render Free plan has no persistent disk, profile pictures (and chat attachments) are stored
+in the PostgreSQL table `file_blobs` under generated keys such as `profile/students/<uuid>.<ext>`. Limits: 3 MB per
+profile picture, 8 MB per chat attachment.
 
 The database stores the corresponding file path/reference.
 
@@ -591,3 +590,15 @@ tied to a single class faculty field: Admin assigns each faculty member to many 
 section may have several faculty), or approves a faculty request to join a section. Student and
 faculty reach each other only through an active class assignment or an accepted supporting-faculty
 relationship. Details: `docs/ACADEMIC_HIERARCHY.md`.
+
+
+---
+
+## Addendum: Hosting and operations (PostgreSQL / Neon)
+
+The application runs on free tiers: React SPA on Vercel, FastAPI on Render **Free** (no persistent disk; sleeps after
+about 15 minutes idle with a cold start of up to about a minute, during which the UI shows a "waking the server"
+banner), and **Neon PostgreSQL** Free (0.5 GB, scales to zero when idle). SQLite is no longer used. Uploads are
+stored in the database. Admin accounts beyond the primary admin are created by e-mail invitation only. Classes typed
+in by users at signup stay unverified, and out of the public pickers, until an admin verifies them. Capacities and
+limits: `DEPLOYMENT.md`; schema: `DATABASE.md`.

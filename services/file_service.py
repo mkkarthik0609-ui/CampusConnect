@@ -15,6 +15,9 @@ from api.db import get_db
 from services import storage
 
 
+MAX_PIXELS = 25_000_000
+
+
 class FileValidationError(Exception):
     pass
 
@@ -65,6 +68,8 @@ def _content_ok(data, ext):
         try:  # must actually decode as an image of the claimed kind
             from PIL import Image
             with Image.open(io.BytesIO(data)) as im:
+                if im.width * im.height > MAX_PIXELS:  # decompression-bomb guard (browsers decode these too)
+                    return False
                 im.verify()
                 return im.format == ("PNG" if ext == "png" else "JPEG")
         except Exception:  # noqa: BLE001 - any decoder failure means "not a valid image"

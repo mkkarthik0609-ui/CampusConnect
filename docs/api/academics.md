@@ -74,6 +74,13 @@ Errors for the four POSTs above:
 (`"... reactivated."` when activating). Errors: `404 not_found` (`"Item not found."`: unknown level or id),
 `400 validation_error` (`fields.active`).
 
+### `POST /api/admin/academics/{level}/{id}/verify`
+`level` is `branch | department | year | section`. No body. Accepts a class level that a student or faculty member
+**typed in** at signup (`custom_class` / "my class is not listed"): such rows are stored with `is_verified = 0` and
+stay out of the public pickers (`GET /api/academic/tree`) until verified. 200
+`{"ok": true, "message": "Section verified.", "level": "section", "id": 73, "is_verified": true}`.
+Errors: `404 not_found` (unknown level or id).
+
 ### `DELETE /api/admin/academics/{level}/{id}`
 Deletes an **unused** item (children are deleted with it). 200
 `{"ok": true, "message": "Section deleted.", "level": "section", "id": 73}`.

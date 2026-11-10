@@ -126,7 +126,8 @@ def _reserved_for_admin(email):
     if get_settings().is_primary_admin(email):
         return True
     return get_db().execute(
-        "SELECT 1 FROM admin_invitations WHERE email = ? AND status = 'PENDING'", (email,)).fetchone() is not None
+        "SELECT 1 FROM admin_invitations WHERE email = ? AND status = 'PENDING' AND expires_at > ?",
+        (email, sq.fmt(sq.utcnow()))).fetchone() is not None
 
 
 def register_student(data):
@@ -234,11 +235,17 @@ def normalize_identifier(identifier):
 def _is_locked_out(identifier, ip):
     cfg = get_settings()
     window = cfg.login_window_minutes
-    if sq.count_recent_failures_for_identifier(identifier, window) >= cfg.login_max_failures_per_identifier:
-        return True
-    if ip and sq.count_recent_failures_for_ip(ip, window) >= cfg.login_max_failures_per_ip:
-        return True
-    return False
+    limit = cfg.login_max_failures_per_identifier
+    if ip:
+        # The lock is per (account, client address): somebody who types the owner's e-mail five times from their own
+        # address locks only THEMSELVES out, never the owner. A much higher total per account is the brake for a
+        # guessing attack spread over many addresses.
+        if sq.count_recent_failures_for_identifier_ip(identifier, ip, window) >= limit:
+            return True
+        if sq.count_recent_failures_for_identifier(identifier, window) >= limit * 10:
+            return True
+        return sq.count_recent_failures_for_ip(ip, window) >= cfg.login_max_failures_per_ip
+    return sq.count_recent_failures_for_identifier(identifier, window) >= limit
 
 
 def login_requires_captcha(identifier, ip=None):

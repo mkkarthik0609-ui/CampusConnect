@@ -10,6 +10,9 @@ Stack (outermost first), assembled in ``api.main.create_app``::
 """
 from __future__ import annotations
 
+import asyncio
+import weakref
+
 import anyio
 
 import hmac
@@ -18,6 +21,7 @@ import logging
 from typing import Optional
 
 from starlette.datastructures import Headers, MutableHeaders
+from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -167,23 +171,106 @@ class SecurityMiddleware:
 # ---------------------------------------------------------------------------------------
 # per-request database holder
 
+_CLOSE_LIMITER = None
+
+
+def _close_limiter():
+    global _CLOSE_LIMITER
+    if _CLOSE_LIMITER is None:
+        _CLOSE_LIMITER = anyio.CapacityLimiter(32)
+    return _CLOSE_LIMITER
+
+
+_NO_ADMISSION_PREFIXES = ("/health", "/assets/")
+
+
+async def _buffer_body(receive, send, scope, timeout):
+    """Returns a ``receive`` that replays the fully-read body, or None after answering 408 / on disconnect."""
+    messages = []
+
+    async def read_all():
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return False
+            messages.append(message)
+            if not message.get("more_body", False):
+                return True
+
+    try:
+        complete = await asyncio.wait_for(read_all(), timeout=timeout)
+    except asyncio.TimeoutError:
+        response = JSONResponse({"error": {"code": "request_timeout", "message": "The request took too long to arrive."}},
+                                status_code=408, headers={"Connection": "close"})
+        await response(scope, receive, send)
+        return None
+    if not complete:
+        return None
+    queue = list(messages)
+
+    async def replay():
+        if queue:
+            return queue.pop(0)
+        return await receive()  # afterwards: the real stream (disconnect notifications)
+
+    return replay
+
+
 class DbMiddleware:
-    """Binds the app's settings and a lazily-checked-out PostgreSQL connection to the request context."""
+    """Binds the app's settings and a lazily-checked-out PostgreSQL connection to the request context.
+
+    ADMISSION CONTROL: at most ``db_pool_max`` requests are processed at once; the rest wait here (cheap, on the
+    event loop) and get a 503 + Retry-After after ``db_pool_timeout`` seconds. Without it, FastAPI's 40 worker
+    threads can all block waiting for one of the few pooled connections while the requests that HOLD connections
+    wait for a free worker thread to continue: a deadlock that only ends through timeouts (observed in the load
+    test at 60 concurrent users). With admitted requests <= pool size every admitted request can always finish."""
 
     def __init__(self, app: ASGIApp, settings: Settings):
         self.app = app
         self.settings = settings
+        self._slots = weakref.WeakKeyDictionary()  # one semaphore per event loop (production has exactly one)
+
+    def _slot_semaphore(self) -> asyncio.Semaphore:
+        loop = asyncio.get_running_loop()
+        sem = self._slots.get(loop)
+        if sem is None:
+            sem = self._slots[loop] = asyncio.Semaphore(max(1, self.settings.db_pool_max))
+        return sem
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
-        with use_settings(self.settings):
-            holder, token = dbmod.open_holder(self.settings)
+        path = scope.get("path", "")
+        gated = not path.startswith(_NO_ADMISSION_PREFIXES)
+        slots = self._slot_semaphore() if gated else None
+        if gated and scope.get("method") in ("POST", "PUT", "PATCH", "DELETE"):
+            # Read the whole body BEFORE taking a slot, under a deadline: a client trickling a body (slowloris)
+            # must not be able to occupy the few slots that serve everybody else.
+            receive = await _buffer_body(receive, send, scope, self.settings.body_read_timeout)
+            if receive is None:
+                return
+        if gated:
             try:
-                await self.app(scope, receive, send)
-            finally:
-                # Returning the connection rolls back any open read transaction (a network round trip):
-                # do it off the event loop.
-                await anyio.to_thread.run_sync(holder.close)
-                dbmod._holder_var.reset(token)
+                await asyncio.wait_for(slots.acquire(), timeout=self.settings.db_pool_timeout)
+            except asyncio.TimeoutError:
+                response = JSONResponse(
+                    {"error": {"code": "service_unavailable",
+                               "message": "The service is busy right now. Please try again in a moment."}},
+                    status_code=503, headers={"Retry-After": "5", "Cache-Control": "no-store"})
+                await response(scope, receive, send)
+                return
+        try:
+            with use_settings(self.settings):
+                holder, token = dbmod.open_holder(self.settings)
+                try:
+                    await self.app(scope, receive, send)
+                finally:
+                    # Returning the connection rolls back any open read transaction (a network round trip): do it
+                    # off the event loop, on a DEDICATED limiter so it can never queue behind blocked endpoints.
+                    with anyio.CancelScope(shield=True):  # a cancelled request must still return its connection
+                        await anyio.to_thread.run_sync(holder.close, limiter=_close_limiter())
+                    dbmod._holder_var.reset(token)
+        finally:
+            if gated:
+                slots.release()

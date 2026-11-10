@@ -38,9 +38,9 @@ def get_branch_by_name(name):
     return get_db().execute("SELECT * FROM branches WHERE name = ?", (name,)).fetchone()
 
 
-def create_branch(name):
+def create_branch(name, verified=True):
     db = get_db()
-    cur = db.execute("INSERT INTO branches (name) VALUES (?)", (name,))
+    cur = db.execute("INSERT INTO branches (name, is_verified) VALUES (?, ?)", (name, 1 if verified else 0))
     db.commit()
     return cur.lastrowid
 
@@ -64,9 +64,10 @@ def get_department(department_id):
     return get_db().execute("SELECT * FROM departments WHERE id = ?", (department_id,)).fetchone()
 
 
-def create_department(branch_id, name):
+def create_department(branch_id, name, verified=True):
     db = get_db()
-    cur = db.execute("INSERT INTO departments (branch_id, name) VALUES (?, ?)", (branch_id, name))
+    cur = db.execute("INSERT INTO departments (branch_id, name, is_verified) VALUES (?, ?, ?)",
+                     (branch_id, name, 1 if verified else 0))
     db.commit()
     return cur.lastrowid
 
@@ -81,11 +82,11 @@ def get_year(year_id):
     return get_db().execute("SELECT * FROM academic_years WHERE id = ?", (year_id,)).fetchone()
 
 
-def create_year(department_id, name, sort_order):
+def create_year(department_id, name, sort_order, verified=True):
     db = get_db()
     cur = db.execute(
-        "INSERT INTO academic_years (department_id, name, sort_order) VALUES (?, ?, ?)",
-        (department_id, name, sort_order),
+        "INSERT INTO academic_years (department_id, name, sort_order, is_verified) VALUES (?, ?, ?, ?)",
+        (department_id, name, sort_order, 1 if verified else 0),
     )
     db.commit()
     return cur.lastrowid
@@ -101,11 +102,20 @@ def get_section(section_id):
     return get_db().execute("SELECT * FROM sections WHERE id = ?", (section_id,)).fetchone()
 
 
-def create_section(year_id, name):
+def create_section(year_id, name, verified=True):
     db = get_db()
-    cur = db.execute("INSERT INTO sections (academic_year_id, name) VALUES (?, ?)", (year_id, name))
+    cur = db.execute("INSERT INTO sections (academic_year_id, name, is_verified) VALUES (?, ?, ?)",
+                     (year_id, name, 1 if verified else 0))
     db.commit()
     return cur.lastrowid
+
+
+def set_level_verified(level, row_id):
+    """Admin accepts a class level that a student / faculty member typed in (it then shows in public pickers)."""
+    table = _LEVEL_TABLES[level]  # allow-list; never interpolate user input
+    db = get_db()
+    db.execute(f"UPDATE {table} SET is_verified = 1 WHERE id = ?", (row_id,))
+    db.commit()
 
 
 _LEVEL_TABLES = {

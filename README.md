@@ -5,13 +5,15 @@ A college web application connecting students and faculty for academic communica
 administration, plus a separate scheduling-research component.
 
 Campus Connect is a **React single-page app** (`frontend/`) talking to a **FastAPI JSON API**
-(`api/`) that stores everything in **SQLite**. See `PRD.md` for the product requirements and `ESD.md`
+(`api/`) that stores everything, uploads included, in **Neon PostgreSQL**. It deploys on free tiers: Vercel
+(SPA), Render Free (API) and Neon Free (database). See `PRD.md` for the product requirements and `ESD.md`
 for the engineering design (both carry a changelog for the architecture migration).
 
 | Document | What it covers |
 |---|---|
-| [`DEPLOYMENT.md`](DEPLOYMENT.md) | Render (API) + Vercel (SPA) step by step, env tables, first admin, smoke checklist, backups, SQLite limits |
-| [`DATABASE.md`](DATABASE.md) | Every table, ER and hierarchy diagrams, idempotent migration / backfill |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md) | Neon + Render Free + Vercel step by step, env tables, free-tier limits, first admin, smoke checklist, backups, restore, key rotation |
+| [`DATABASE.md`](DATABASE.md) | Every table, ER and hierarchy diagrams, connection model, numbered migrations |
+| [`docs/KEEP_ALIVE.md`](docs/KEEP_ALIVE.md) | Optional keep-alive ping for the sleeping Render Free service |
 | [`docs/ACADEMIC_HIERARCHY.md`](docs/ACADEMIC_HIERARCHY.md) | Branch / Department / Year / Section model, Admin authority, access rules |
 | [`docs/api/README.md`](docs/api/README.md) | Index of the API documentation (conventions, architecture, per-area endpoints) |
 | [`frontend/README.md`](frontend/README.md) | SPA structure, design tokens, API client, how to add a page |
@@ -22,13 +24,15 @@ for the engineering design (both carry a changelog for the architecture migratio
 
 ```mermaid
 flowchart LR
-    B["Browser"] -->|HTTPS| V["Vercel<br/>React SPA (frontend/dist)<br/>rewrites /api and /uploads"]
-    V -->|"/api/*, /uploads/*, /healthz<br/>(same browser origin)"| R["Render web service<br/>FastAPI (api/main.py)<br/>1 uvicorn process + APScheduler"]
+    B["Browser"] -->|HTTPS| V["Vercel<br/>React SPA (frontend/dist)<br/>rewrites /api, /uploads, /healthz"]
+    V -->|"/api/*, /uploads/*, /healthz<br/>(same browser origin)"| R["Render Free web service<br/>FastAPI (api/main.py)<br/>1 uvicorn process + APScheduler"]
     R --> S["services/<br/>business rules"]
     S --> Q["models/<br/>parameterized SQL"]
-    Q --> D[("SQLite<br/>/var/data/campusconnect.db")]
-    R --> U[("uploads/<br/>/var/data/uploads")]
+    Q --> D[("Neon PostgreSQL<br/>pooled URL at runtime<br/>tables + file_blobs (uploads)")]
 ```
+
+Render Free has no persistent disk and sleeps after ~15 minutes idle (cold start up to ~60 s; the UI shows a
+"waking the server" banner and retries idempotent GETs), so the API keeps no local state.
 
 * The browser only ever talks to **one origin**. In production Vercel serves the SPA and proxies
   `/api/*` and `/uploads/*` to Render, so the `cc_session` cookie is first-party and no CORS is needed. In
@@ -47,29 +51,32 @@ CampusConnect/
 │   ├── settings.py         Settings dataclass + every environment variable
 │   ├── security.py         ASGI middlewares: proxy headers, security headers / CSP, 10 MB cap, DB holder
 │   ├── deps.py             auth / role / CSRF dependencies, request helpers
-│   ├── db.py               sqlite3 connection handling, init_db(), additive migrations, seed
+│   ├── db.py               psycopg pool, sqlite-style SQL translation, migration runner, init_db(), seed
 │   ├── errors.py           JSON error handlers, SPA index fallback
 │   ├── schemas.py          shared response shapes
 │   └── routers/            system, auth, account, academic, notifications, uploads, admin,
-│                           admin_academic, admin_passkeys, faculty, student, chat, meetings, supporting, research
+│                           admin_academic, admin_messages, faculty, student, chat, meetings, supporting, research
 ├── services/               business logic (auth, captcha, academic, assignment, permission, chat, meeting,
-│   │                       supporting, notification, file, session) + errors.py
+│   │                       supporting, notification, file, storage, invitation, mail, audit, presence, session)
+│   │                       + errors.py
 │   └── scheduling/         RESEARCH ONLY: core engine, fcfs, rule_based, intelligent, metrics,
 │                           simulator, experiment
-├── models/                 schema.sql + SQL modules (queries, academic_queries, admin_queries,
-│                           connect_queries, security_queries); database.py is a shim to api/db.py
+├── migrations/             numbered PostgreSQL migrations (0001 baseline, 0002 invitations/file_blobs/audit/presence,
+│                           0003 unverified classes), applied automatically at start
+├── models/                 SQL modules (queries, academic_queries, admin_queries, connect_queries,
+│                           security_queries); database.py is a shim to api/db.py
 ├── frontend/               React 19 + Vite + Tailwind v4 + shadcn/ui SPA (own README, vercel.json)
 ├── research/               scheduling experiment entry point, data/, results/
 ├── docs/                   ACADEMIC_HIERARCHY.md, api/ (API contract and per-area endpoint docs)
-├── tests/                  pytest suite (FastAPI TestClient, temp database per test)
-├── scripts/backup_db.py    online SQLite backup (+ integrity check, pruning)
+├── tests/                  pytest suite (FastAPI TestClient, throw-away PostgreSQL database per pytest process)
+├── scripts/                migrate_sqlite_to_postgres.py (one-off import), backup_db.py / restore_db.py
+│                           (logical JSON backup/restore), start-dev.ps1
 ├── app.py                  tiny local runner (uvicorn)
 ├── create_admin.py         CLI: create an admin (interactive or --from-env)
-├── render.yaml             Render Blueprint (API + persistent disk)
-├── requirements.txt        runtime dependencies          requirements-dev.txt   + pytest, httpx2
+├── render.yaml             Render Blueprint (free plan, no disk)
+├── requirements.txt        runtime dependencies          requirements-dev.txt   + pytest, httpx
 ├── requirements-research.txt   optional: matplotlib for the research charts
 ├── .env.example            documented environment variables
-├── uploads/                profile/{students,faculty}, chat (contents git-ignored)
 └── .github/workflows/ci.yml   backend tests + frontend lint/build
 ```
 
@@ -127,40 +134,48 @@ Set `VITE_BACKEND_URL` to point the dev proxy somewhere other than `http://127.0
 
 ### Database
 
-The schema is created (and older databases are upgraded) automatically on start by
-`api/db.init_db()`: tables use `CREATE TABLE IF NOT EXISTS`, missing columns are added with `ALTER TABLE`,
-the default academic structure is seeded once and legacy free-text classes are linked to it. The file is
-`database.db` in the repo root (override with `DATABASE_PATH`), git-ignored, and must never be committed.
-To start fresh locally, stop the API and delete `database.db` (and any `-wal` / `-shm` files). Details:
+The app needs a PostgreSQL database. Locally use any PostgreSQL 14+ server (or a free Neon branch) and put its
+URLs in your git-ignored `.env`: `DATABASE_URL` (direct, used for migrations) and `DATABASE_URL_POOLED` (runtime;
+if only one is set it is used for both). On start `api/db.init_db()` applies every `migrations/NNNN_name.sql` that
+is not yet recorded in `schema_migrations` (under an advisory lock), seeds the default academic structure once and
+links legacy free-text classes to it. Never commit `.env`. To start fresh locally, drop and recreate the database.
+The old SQLite file can be imported once with `scripts/migrate_sqlite_to_postgres.py` (dry run by default). Details:
 [`DATABASE.md`](DATABASE.md).
 
 ### Creating the first admin
 
 There is **no public admin signup**. Choose one:
 
-A designated administrator account manages the application.
-Other administrator accounts are restricted by the system.
-Authentication behavior differs between development and production.
-Production always verifies the stored password.
+The **primary admin** (`PRIMARY_ADMIN_EMAIL`, default `mkkarthik0609@gmail.com`) is the owner account: it cannot
+be deactivated or deleted, and only it can invite further admins (Admin -> Admins; single-use e-mailed link, see
+[`docs/api/admin.md`](docs/api/admin.md)). The primary admin is created with:
+
 ```powershell
 venv\Scripts\python.exe create_admin.py              # interactive (name, email, password prompts)
 venv\Scripts\python.exe create_admin.py --from-env   # reads ADMIN_NAME, ADMIN_EMAIL, ADMIN_PASSWORD from the environment / .env
 ```
 
 or set `BOOTSTRAP_ADMIN=1` with `ADMIN_NAME` / `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `.env` (or the Render
-dashboard) and the API creates that admin on start-up when the account does not exist (idempotent; an
-existing password is never overwritten). Passwords need at least 8 characters with upper-case, lower-case and a
-digit. Put real values only in your private `.env` or the hosting dashboard, never in tracked files.
+dashboard) and the API creates that admin on start-up **only if the account does not exist** (an existing
+password is never overwritten, and `ADMIN_PASSWORD` is dropped from the running process' environment afterwards).
+After the first successful start remove `ADMIN_PASSWORD` and set `BOOTSTRAP_ADMIN=0`. Passwords need at least 8
+characters with upper-case, lower-case and a digit. Put real values only in your private `.env` or the hosting
+dashboard, never in tracked files.
 
 ### Tests
 
+The backend tests need a **throw-away PostgreSQL server**. Set `TEST_DATABASE_ADMIN_URL` to a superuser connection
+(default `postgresql://postgres@127.0.0.1:54329/postgres`); the suite creates and drops its own `cc_test_*`
+databases. **Never point it at Neon production.**
+
 ```powershell
-venv\Scripts\python.exe -m pytest tests -q
+pip install -r requirements-dev.txt
+python -m pytest tests -n 4
 cd frontend; npm run lint; npm run build
 ```
 
 CI (`.github/workflows/ci.yml`) runs the backend tests on Python 3.12 and the frontend `npm ci`, lint and
-build on Node 24, on every push and pull request.
+build on Node 24, on every push and pull request (check the workflow file for how it provides PostgreSQL).
 
 ## 4. Academic hierarchy (summary)
 
@@ -198,9 +213,19 @@ Full rules and the file that implements each check: [`docs/ACADEMIC_HIERARCHY.md
 
 ## 6. Security features
 
-- Passwords hashed with Werkzeug (salted); password policy enforced; college-email passwords are never requested.
-- Login throttling and temporary lockout per account and per IP (`login_attempts` table); one generic error for
-  unknown user / wrong password / inactive account.
+- Email/password sign-in only (passkeys/WebAuthn were removed). Passwords are hashed with **Argon2id** (OWASP
+  profile); legacy werkzeug hashes still verify and are upgraded at the next login; password policy enforced;
+  college-email passwords are never requested.
+- Sessions carry a `session_version`: a password change/reset or deactivation bumps it and ends the user's other
+  sessions.
+- Login throttling and temporary lockout (`login_attempts` table): 5 failures per identifier per 15 minutes, a
+  per-IP hard limit of 150 (campus Wi-Fi shares one IP) and an image captcha after 10 failures per IP (3 per
+  identifier); one generic error for unknown user / wrong password / inactive account.
+- Admin invitations (primary admin only): 256-bit single-use token, only its SHA-256 stored, link
+  `PUBLIC_APP_URL/admin-invite#t=<token>` (URL fragment, never reaches server logs), default 72 h expiry, e-mailed
+  through Resend; if mail is not configured the API says `NOT_CONFIGURED` and returns the link instead of
+  pretending to have sent it. No temporary passwords exist. Public signup cannot claim the primary admin's e-mail
+  or any e-mail with a pending invitation. Sensitive admin actions are written to `audit_log`.
 - Signed session cookie `cc_session`: `HttpOnly`, `SameSite=Lax`, `Secure` in production, absolute (12 h) and
   idle (60 min) timeouts; the user's role and active flag are re-read from the database on every request.
 - CSRF protection on every `POST/PUT/PATCH/DELETE` (header `X-CSRFToken`, constant-time comparison, enforced by
@@ -214,8 +239,10 @@ Full rules and the file that implements each check: [`docs/ACADEMIC_HIERARCHY.md
   only from the environment; `/docs` is disabled in production.
 - Role and ownership checks are server-side (`api/deps.require_role` plus per-record checks in services);
   class-scope rules are in `docs/ACADEMIC_HIERARCHY.md`.
-- Uploads are validated by extension, size and content, stored under generated names and served only to
-  authorised signed-in users through `/uploads/*` (non-images as downloads).
+- Uploads (8 MB chat attachment, 3 MB profile picture) are validated by extension, size, magic bytes and file
+  structure (Pillow decode, PDF `%%EOF`, docx zip with `word/`), stored in PostgreSQL (`file_blobs`) under
+  generated names and served only to authorised signed-in users through `/uploads/*` (profile pictures: any
+  signed-in user; chat files: the two participants or an admin; non-images as downloads).
 - All SQL is parameterized. Signup is protected by a single-use image captcha (answer HMAC-hashed at rest, issuing rate limited per IP); login adds one after repeated failures.
 - Proxy-aware client IP (`TRUST_PROXY`, `TRUST_PROXY_HOPS`) so rate limiting works behind Vercel and Render.
 
@@ -237,16 +264,36 @@ Admins can view the committed results (and rerun a quick simulation) in the SPA 
 
 ## 8. Deployment summary
 
-**Render** hosts the API (single uvicorn process, persistent disk at `/var/data` for the SQLite file and
-uploads, health check `/healthz`); **Vercel** hosts the React SPA and rewrites `/api` and `/uploads` to Render.
+**Neon** (Free) holds all data including uploads; **Render** (Free plan, no disk) hosts the API as a single uvicorn
+process with health check `/healthz`; **Vercel** hosts the React SPA and rewrites `/api`, `/uploads` and `/healthz`
+to Render.
 
-1. Render: *New -> Blueprint*, select the repo, enter `ADMIN_NAME` / `ADMIN_EMAIL` / `ADMIN_PASSWORD`, apply (paid
-   **Starter** plan needed for the disk).
-2. Vercel: *New Project*, import the repo, **Root Directory = `frontend`**, set `BACKEND_URL` to the Render URL
-   (or run `npm run set-backend-url -- https://<service>.onrender.com` in `frontend/` and commit
-   `frontend/vercel.json`), deploy.
+1. Neon: create a project near Render's Oregon region and copy the **direct** and **pooled** connection strings.
+2. Render: *New -> Blueprint*, select the repo, enter `DATABASE_URL`, `DATABASE_URL_POOLED` and
+   `ADMIN_NAME` / `ADMIN_EMAIL` / `ADMIN_PASSWORD`, apply. The first start runs the migrations. Afterwards remove
+   `ADMIN_PASSWORD` and set `BOOTSTRAP_ADMIN=0`.
+3. Vercel: *New Project*, import the repo, **Root Directory = `frontend`**; make sure the rewrites in
+   `frontend/vercel.json` point at the Render URL (`npm run set-backend-url -- https://<service>.onrender.com`).
+   Vercel needs no environment variables.
 
-Step by step, the free-plan data-loss warning, backups and limits: [`DEPLOYMENT.md`](DEPLOYMENT.md).
+Step by step, free-tier limits, backups, restore and key rotation: [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
+## 8a. Architecture / Reliability
+
+- All SQL stays in `models/*.py` in a sqlite-style dialect (`?`, `datetime('now')`); `api/db.py` translates it for
+  PostgreSQL. Timestamps are TEXT `YYYY-MM-DD HH:MM:SS` (UTC), case-insensitive columns are `citext`, flags are
+  INTEGER 0/1.
+- Pooled Neon connection (PgBouncer transaction mode, no prepared statements, TLS, pool max 5, 15 s connect
+  timeout, retries with backoff); uncommitted work is rolled back when the connection returns to the pool. If the
+  database is unreachable the API returns `503` with `Retry-After`; a unique-violation race returns `409`.
+- Registration and approvals are atomic (`db.transaction()`); meeting status changes are guarded updates
+  (`UPDATE ... WHERE status = ...`); chat creation uses `INSERT ... ON CONFLICT DO NOTHING`; meeting reminders are
+  claimed atomically (`claim_meeting_reminder`); presence is persisted (table `presence`, throttled).
+- A faculty member's `professional_email` change updates `users.email` in the same transaction.
+- Classes typed in at signup are stored `is_verified = 0` and hidden from public pickers until an admin calls
+  `POST /api/admin/academics/{level}/{id}/verify`.
+- List queries are bounded: newest 300 messages per thread request; admin lists capped at 2000 rows.
+- `/healthz` never touches the database, so Render's health checks do not wake Neon.
 
 ## 9. Design constraints honored
 

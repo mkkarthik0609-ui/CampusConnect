@@ -1,30 +1,28 @@
-# Render Blueprint for the Campus Connect BACKEND (FastAPI + SQLite, JSON API).
+# Render Blueprint for the Campus Connect BACKEND (FastAPI, JSON API) on the FREE plan.
 #
-# The React SPA is deployed separately on Vercel (frontend/vercel.json). Vercel rewrites /api/* and
-# /uploads/* to this service, so the browser only ever sees ONE origin (the Vercel domain): session
-# cookies are first-party and no CORS configuration is needed.
+# The React SPA is deployed separately on Vercel (frontend/vercel.json). Vercel rewrites /api/*, /uploads/* and
+# /healthz to this service, so the browser only ever sees ONE origin (the Vercel domain): session cookies are
+# first-party and no CORS configuration is needed.
 #
-# A persistent disk requires a PAID instance type (starter or higher). On the free plan the
-# filesystem is ephemeral and the SQLite database + uploads are wiped on every deploy/restart.
+# State lives OUTSIDE this service: the database AND uploads are in Neon PostgreSQL, so the free plan's
+# ephemeral filesystem (wiped on every deploy/restart/sleep) holds nothing that matters. There is no disk.
+# Free web services sleep after ~15 minutes without traffic; the first request afterwards takes up to ~60 s
+# (the SPA shows a "waking the server" banner and retries). That is a platform limit, not something to hide.
 services:
   - type: web
     name: campus-connect
     runtime: python
-    plan: starter
+    plan: free
     region: oregon
     branch: main
     autoDeploy: true
     buildCommand: pip install -r requirements.txt
-    # EXACTLY ONE process: the meeting-reminder APScheduler job lives in-process and SQLite has a
-    # single writer. Never raise --workers.
-    # --no-proxy-headers: uvicorn must NOT rewrite the client address itself; the app does it
-    # (TRUST_PROXY=1 -> api.security.ProxyHeadersMiddleware, which honours TRUST_PROXY_HOPS).
+    # EXACTLY ONE process: it runs the in-process meeting-reminder job (reminders are also claimed atomically in
+    # SQL, so an overlapping deploy can never double-send). --no-proxy-headers: uvicorn must NOT rewrite the client
+    # address itself; the app does it (TRUST_PROXY=1 -> api.security.ProxyHeadersMiddleware, TRUST_PROXY_HOPS).
     startCommand: python -m uvicorn api.main:app --host 0.0.0.0 --port $PORT --workers 1 --no-proxy-headers
+    # /healthz never touches the database, so health checks do not keep Neon's compute awake.
     healthCheckPath: /healthz
-    disk:
-      name: campus-connect-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
@@ -33,10 +31,14 @@ services:
         value: production
       - key: SECRET_KEY
         generateValue: true
-      - key: DATABASE_PATH
-        value: /var/data/campusconnect.db
-      - key: UPLOAD_ROOT
-        value: /var/data/uploads
+      # Neon connection strings are secrets: set them in the Render dashboard (sync: false keeps them out of git).
+      # DATABASE_URL = DIRECT endpoint (migrations); DATABASE_URL_POOLED = "-pooler" endpoint (all app traffic).
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_POOLED
+        sync: false
+      - key: DB_POOL_MAX
+        value: "10"
       # Honour X-Forwarded-* (client IP for rate limiting, https scheme).
       - key: TRUST_PROXY
         value: "1"
@@ -44,18 +46,26 @@ services:
       # Use "1" if a custom domain points straight at Render and Vercel is not in the path.
       - key: TRUST_PROXY_HOPS
         value: "2"
-      # First-admin bootstrap (idempotent, never overwrites an existing password). ADMIN_EMAIL must be
-      # the primary admin (PRIMARY_ADMIN_EMAIL, default mkkarthik0609@gmail.com); that admin appoints more.
-      # Fill ADMIN_* in the Render dashboard; the values are NOT stored in this file.
-      # Optional: PRIMARY_ADMIN_EMAIL and WEBAUTHN_ALLOWED_ORIGINS (comma separated browser origins that
-      # may use admin passkeys; default https://campus-connect-network.vercel.app + localhost dev ports).
+      # First-admin bootstrap (idempotent: creates the primary admin only when absent, never overwrites a
+      # password, then drops ADMIN_PASSWORD from the process environment). Fill ADMIN_* in the dashboard; they are
+      # NOT stored in this file. After the first successful start delete ADMIN_PASSWORD and set BOOTSTRAP_ADMIN=0.
       - key: BOOTSTRAP_ADMIN
         value: "1"
+      - key: PRIMARY_ADMIN_EMAIL
+        value: mkkarthik0609@gmail.com
       - key: ADMIN_NAME
         sync: false
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
+        sync: false
+      # Admin invitations: links point at the SPA; e-mail goes out through Resend (free tier). Without
+      # RESEND_API_KEY + MAIL_FROM the app reports NOT_CONFIGURED and never claims a mail was sent.
+      - key: PUBLIC_APP_URL
+        value: https://campus-connect-network.vercel.app
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
         sync: false
       - key: REMINDER_INTERVAL_MINUTES
         value: "60"

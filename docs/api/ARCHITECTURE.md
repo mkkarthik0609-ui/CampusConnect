@@ -1,4 +1,4 @@
-# Backend architecture (FastAPI + raw sqlite3)
+# Backend architecture (FastAPI + PostgreSQL via psycopg)
 
 Campus Connect is a pure JSON API (`/api/*`), file serving (`/uploads/*`) and `/healthz`; the React SPA in
 `frontend/` is the only UI. The contract is `docs/api/CONVENTIONS.md`; this file explains how the code is wired
@@ -7,7 +7,8 @@ and how to add a router.
 ```
 api/main.py        create_app(settings=None) -> FastAPI ; lazy module attribute `app` (uvicorn api.main:app)
 api/settings.py    Settings dataclass (+ from_env), get_settings(), use_settings()
-api/db.py          get_db(), db_session(), init_db(), connect()        (models/database.py is a shim to this)
+api/db.py          psycopg pool, get_db(), db_session(), transaction(), SQL translation, run_migrations(), init_db()
+                   (models/database.py is a shim to this); migrations live in migrations/NNNN_name.sql
 api/security.py    ASGI middlewares (proxy, headers/size cap/500 net, db holder), CSP, CSRF compare
 api/errors.py      ApiError + handlers, map_service_error(), SPA index fallback
 api/deps.py        get_current_user, current_user_optional, require_role, csrf_protect, client_ip,
@@ -27,9 +28,9 @@ venv\Scripts\python.exe app.py                                        # same, vi
 venv\Scripts\python.exe -m pytest -q                                  # tests
 venv\Scripts\python.exe create_admin.py [--from-env]                  # first admin
 ```
-Production (Render, **one process**): `uvicorn api.main:app --host 0.0.0.0 --port $PORT --no-proxy-headers`
-(`TRUST_PROXY=1` makes the app itself read `X-Forwarded-*`, see below). Do not use several workers: the
-APScheduler reminder job lives in the process and SQLite has a single writer.
+Production (Render Free, **one process**): `uvicorn api.main:app --host 0.0.0.0 --port $PORT --workers 1 --no-proxy-headers`
+(`TRUST_PROXY=1` makes the app itself read `X-Forwarded-*`, see below). Keep one worker: the in-process
+APScheduler reminder job lives in the process (reminders are also claimed atomically in the database). The service has no disk and no local state: data and uploads are in Neon PostgreSQL.
 
 ## Settings / environment variables
 
@@ -41,15 +42,20 @@ an explicit `Settings(...)`.
 | `APP_ENV` | `environment` | `development`; `production` (or `RENDER` set) enables Secure cookie, HSTS, SECRET_KEY check, disables docs |
 | `SECRET_KEY` | `secret_key` | **required in production** (>= 24 chars); dev: random key persisted in `.dev_secret_key` |
 | `DEBUG` | `debug` | enables `/docs`, `/redoc`, `/openapi.json` and reload in `app.py` (never in production) |
-| `DATABASE_PATH` | `database_path` | `database.db` in repo root |
-| `UPLOAD_ROOT` | `upload_root` | `uploads/` (derived: `profile_student_dir`, `profile_faculty_dir`, `chat_upload_dir`) |
+| `DATABASE_URL_POOLED` | `database_url` | Neon pooled URL (PgBouncer transaction mode): all runtime traffic. Falls back to `DATABASE_URL` |
+| `DATABASE_URL` | `database_url_direct` | Neon direct URL: migrations / maintenance. Falls back to the pooled URL |
+| `DB_POOL_MAX` | `db_pool_max` | 5 (pool timeout 15 s, connect timeout 15 s, 4 connect retries with backoff) |
 | `FRONTEND_DIST` | `frontend_dist` | `frontend/dist` |
 | `TRUST_PROXY`, `TRUST_PROXY_HOPS` | `trust_proxy`, `trust_proxy_hops` | client IP = `hops`-th from the right of `X-Forwarded-For` (Vercel + Render = 2) |
 | `CAPTCHA_MAX_PER_IP_PER_HOUR`, `LOGIN_CAPTCHA_AFTER_FAILURES` | `captcha_max_per_ip_per_hour`, `login_captcha_after_failures` | 60 / 3 |
-| `LOGIN_MAX_FAILURES_PER_IDENTIFIER`, `LOGIN_MAX_FAILURES_PER_IP` | `login_max_failures_*` | 5 / 20 per 15 min |
+| `LOGIN_MAX_FAILURES_PER_IDENTIFIER`, `LOGIN_MAX_FAILURES_PER_IP` | `login_max_failures_*` | 5 / 150 per 15 min (captcha after 3 per identifier, 10 per IP) |
 | `SESSION_IDLE_TIMEOUT_MINUTES` | `session_idle_timeout_minutes` | 60 (absolute lifetime 12 h = `session_lifetime_seconds`) |
 | `ENABLE_SCHEDULER` | `enable_scheduler` | `1`; reminder job interval `REMINDER_INTERVAL_MINUTES` (60) |
-| `BOOTSTRAP_ADMIN` + `ADMIN_NAME/EMAIL/PASSWORD` | `bootstrap_admin` | idempotent first admin at start; never overwrites an existing password |
+| `BOOTSTRAP_ADMIN` + `ADMIN_NAME/EMAIL/PASSWORD` | `bootstrap_admin` | creates the primary admin at start only if absent; never overwrites a password; drops `ADMIN_PASSWORD` from the process environment afterwards |
+| `PRIMARY_ADMIN_EMAIL` | `primary_admin_email` | `mkkarthik0609@gmail.com`; cannot be deactivated; only it invites admins |
+| `PUBLIC_APP_URL`, `INVITE_TTL_HOURS` | `public_app_url`, `invite_ttl_hours` | invitation link origin; invitation lifetime (72 h) |
+| `RESEND_API_KEY`, `MAIL_FROM` | `resend_api_key`, `mail_from` | e-mail delivery of invitations (Resend); unset => `NOT_CONFIGURED` |
+| `SEED_EXTRA_BRANCHES` | `seed_extra_branches` | `1`; seeds ECE, ISE, ... besides CSE |
 | - | `csrf_enabled` | `True`; only tests set `False` |
 | - | `testing` | `True` in tests: no scheduler, no admin bootstrap, random secret if none |
 
@@ -61,13 +67,13 @@ Services read configuration with `from api.settings import get_settings; get_set
 2. `SecurityMiddleware`: 10 MB cap (413), security headers + CSP, `Cache-Control: no-store` on every `/api/*`
    response, last-resort JSON 500.
 3. `DbMiddleware`: binds the app's settings and installs an empty *holder* in a ContextVar. `get_db()` opens the
-   sqlite3 connection lazily into the holder (foreign_keys ON, busy_timeout, WAL). The holder is a mutable object,
+   pooled PostgreSQL connection lazily into the holder (psycopg pool; Neon pooler, no prepared statements). The holder is a mutable object,
    so sync `def` endpoints and sync dependencies (run in the threadpool with a *copy* of the context) share one
-   connection per request; the middleware closes it when the request ends. `models/*queries.py` simply call
-   `get_db()`. Queries commit themselves (`db.commit()`); there is no implicit transaction per request.
+   connection per request; when the request ends the middleware returns it to the pool, rolling back anything uncommitted. `models/*queries.py` simply call
+   `get_db()`. Queries commit themselves (`db.commit()`); there is no implicit transaction per request. Multi-statement units of work (registration, approvals, invitation acceptance) use `with db.transaction():` so they are atomic. Database errors map to JSON: unique violation -> 409 `conflict`, unreachable database -> 503 `service_unavailable` + `Retry-After`.
 4. `SessionMiddleware` (Starlette): HttpOnly, SameSite=Lax (Secure in production) signed cookie `cc_session`
    -> `request.session` (a dict). Forged/unsigned cookies give an empty session. Keys: `user_id, role, full_name,
-   student_id, faculty_id, theme, login_at, last_seen, csrf_token`.
+   student_id, faculty_id, theme, login_at, last_seen, csrf_token, sv` (`sv` = the user's `session_version`; a mismatch ends the session).
 5. App-level dependency `csrf_protect` (runs for every route): POST/PUT/PATCH/DELETE must carry header
    `X-CSRFToken` equal (constant-time) to `session["csrf_token"]`, else 400 `csrf_failed`. Safe methods are exempt.
 6. Route dependencies: `get_current_user` validates the session (absolute + idle timeouts, user exists and
@@ -97,7 +103,7 @@ class RequestMeetingIn(ApiModel):                      # extra="forbid": unknown
     reason: Stripped                                   # Stripped = str with whitespace stripped (not for passwords)
     message: Stripped = ""
 
-@router.post("", status_code=201)                      # plain `def`, never `async def` (sqlite3 is sync)
+@router.post("", status_code=201)                      # plain `def`, never `async def` (the DB layer is synchronous)
 def request_meeting(body: RequestMeetingIn,
                     user: CurrentUser = Depends(require_role("STUDENT"))):
     with service_errors():                             # ValidationError/MeetingError/... -> ApiError 400/403/404/409
@@ -133,7 +139,7 @@ Rules:
 
 ## Tests
 
-`tests/conftest.py` builds the app on a temp database/upload dir with `csrf_enabled=False`:
+`tests/conftest.py` builds the app on a throw-away PostgreSQL database (one migrated `cc_test_*` database per pytest process on the server named by `TEST_DATABASE_ADMIN_URL`, default `postgresql://postgres@127.0.0.1:54329/postgres`, a superuser connection; tables are truncated after every test) with `csrf_enabled=False`. Never point it at Neon production. Run `pip install -r requirements-dev.txt` then `python -m pytest tests -n 4`:
 
 ```python
 from tests.conftest import (PASSWORD, make_admin, register_faculty, register_student, find_section,
@@ -153,4 +159,4 @@ Fixtures `admin` (dict with `user_id`, `email`, `password`) and `admin_client` (
 Database assertions: `db_one(app, "SELECT ...", params)`, `db_all`, `db_exec`, `db_count(app, table, where, params)`
 (each opens `db_session(app.state.settings)`). For custom code use `with db_session(app.state.settings):`.
 CSRF is off by default; to test it build a second app with `Settings(..., csrf_enabled=True)` (see
-`tests/test_security.py`). Passwords in tests are hashed with a cheap pbkdf2 (autouse fixture).
+`tests/test_security.py`). Passwords in tests are hashed with the cheapest legal Argon2id parameters (autouse fixture).

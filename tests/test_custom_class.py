@@ -24,8 +24,26 @@ def test_student_can_type_a_class_that_is_not_listed(app, client):
     st = db_one(app, "SELECT * FROM students WHERE usn = '1AB21CS201'")
     assert (st["branch"], st["department"], st["year"], st["section"]) == ("Mechanical", "Robotics", "3rd Year", "B")
     assert st["section_id"] is not None
+    # Typed-in classes work for the student but are NOT offered in the public pickers until an admin verifies them.
     tree = client.get("/api/academic/tree").json()["branches"]
-    assert "Mechanical" in [b["name"] for b in tree]
+    assert "Mechanical" not in [b["name"] for b in tree]
+    assert db_one(app, "SELECT is_verified FROM branches WHERE name = 'Mechanical'")["is_verified"] == 0
+    assert db_one(app, "SELECT is_verified FROM sections WHERE id = ?", (st["section_id"],))["is_verified"] == 0
+    from tests.conftest import make_admin, ADMIN_EMAIL
+    make_admin(app)
+    ac = login_client(app, ADMIN_EMAIL)
+    admin_tree = ac.get("/api/admin/academics").json()["branches"]
+    mech = next(b for b in admin_tree if b["name"] == "Mechanical")
+    assert mech["is_verified"] is False
+    for level, row_id in (("branch", mech["id"]),):
+        assert api_post(ac, f"/api/admin/academics/{level}/{row_id}/verify").status_code == 200
+    dept = mech["departments"][0]
+    year = dept["years"][0]
+    for level, row_id in (("department", dept["id"]), ("year", year["id"]), ("section", year["sections"][0]["id"])):
+        assert api_post(ac, f"/api/admin/academics/{level}/{row_id}/verify").status_code == 200
+    assert "Mechanical" in [b["name"] for b in client.get("/api/academic/tree").json()["branches"]]
+    assert api_post(ac, "/api/admin/academics/branch/999999/verify").status_code == 404
+    assert api_post(login_client(app, "c1@college.edu"), f"/api/admin/academics/branch/{mech['id']}/verify").status_code == 403
 
 
 def test_typed_class_reuses_existing_rows_case_insensitively(app, client):

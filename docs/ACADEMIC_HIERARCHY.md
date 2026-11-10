@@ -140,13 +140,13 @@ Consequences worth knowing:
   did not match any Admin structure, have `section_id IS NULL`; the admin dashboard counts them
   so Admin can fix them (remove registration, have the student re-register).
 
-## 7. Migration of pre-hierarchy databases
+## 7. Schema migrations and pre-hierarchy data
 
-`models/database.init_db()` is additive and idempotent (safe on every start):
+`api.db.init_db()` applies the numbered PostgreSQL migrations in `migrations/` (tracked in `schema_migrations`) and then the idempotent seed/backfill (safe on every start):
 
-1. `schema.sql` creates the new tables with `CREATE TABLE IF NOT EXISTS`.
-2. `_migrate()` adds `students.section_id` (+ index) and `users.last_login_at` if missing.
-3. `seed_default_structure()` seeds CSE only when no branch exists.
+1. `migrations/0001_baseline.sql` creates the hierarchy, assignment and request tables (`IF NOT EXISTS`).
+2. `0003_unverified_classes.sql` adds `is_verified` to the four hierarchy tables: classes typed in by a student or faculty member are stored with `is_verified = 0` and hidden from the public pickers until an admin verifies them (`POST /api/admin/academics/{level}/{id}/verify`).
+3. `seed_default_structure()` seeds CSE only when no branch exists (`seed_extra_structure()` adds further branches unless `SEED_EXTRA_BRANCHES=0`).
 4. `backfill_legacy_data()` links old `students` rows to a section when their free-text
    branch / department / year / section match an Admin structure, and converts legacy
    `faculty_classes` rows into `faculty_assignments`. Rows that do not match are left untouched.

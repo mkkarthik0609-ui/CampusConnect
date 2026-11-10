@@ -12,7 +12,7 @@
 Build a simple, fully functional, deployable college web application using:
 
 - Python + FastAPI (JSON API under `/api/*`)
-- SQLite (standard library `sqlite3`, single writer)
+- PostgreSQL (Neon) via psycopg 3 + psycopg_pool; numbered SQL migrations in `migrations/`
 - React + JavaScript + Vite + Tailwind CSS + shadcn/ui + Framer Motion (SPA in `frontend/`)
 
 The architecture should be understandable to a college project team and should avoid unnecessary complexity.
@@ -34,7 +34,7 @@ FastAPI Application (api/)
 Business Logic       File Storage
    |
    v
-SQLite Database
+PostgreSQL (Neon), incl. file_blobs for uploads
 ```
 
 The application should be organized into logical modules rather than putting the entire project into one giant `app.py`.
@@ -49,7 +49,7 @@ campus_connect/
 ├── app.py                  local runner (uvicorn api.main:app)
 ├── create_admin.py
 ├── requirements.txt
-├── database.db             (git-ignored)
+├── migrations/             numbered PostgreSQL migrations (0001..0003)
 │
 ├── api/
 │   ├── main.py, settings.py, db.py, deps.py, errors.py, security.py, schemas.py
@@ -63,15 +63,15 @@ campus_connect/
 │   │   academic_service.py, assignment_service.py, supporting_service.py
 │   └── scheduling/         fcfs.py, rule_based.py, intelligent.py, metrics.py, simulator.py
 │
-├── models/                 database.py (schema), queries.py, academic_queries.py, ...
+├── models/                 queries.py, academic_queries.py, admin_queries.py, ... (sqlite-style SQL, translated by api/db.py)
 ├── frontend/               React SPA (src/, vite.config.js, vercel.json)
 ├── docs/api/               API contract and per-area docs
 │
-└── uploads/
-    ├── profile/
-    │   ├── students/
-    │   └── faculty/
-    └── chat/
+└── scripts/                migrate_sqlite_to_postgres.py, backup_db.py, restore_db.py
+
+Uploads are NOT stored on disk: Render Free has no persistent disk. Files live in the PostgreSQL table
+`file_blobs` (bytea) under the same relative keys (`chat/<uuid>.<ext>`, `profile/students|faculty/<uuid>.<ext>`)
+through services/storage.py.
 ```
 
 The exact folder names may change during implementation, but the separation of concerns must remain.
@@ -98,7 +98,7 @@ An authorized setup/admin process creates admin accounts.
 
 # 5. Database Design
 
-SQLite is the recommended database.
+PostgreSQL (Neon Free) is the database. Schema: `migrations/*.sql`; see DATABASE.md.
 
 Use foreign keys and appropriate indexes.
 
@@ -439,7 +439,7 @@ USER
 
 ## Passwords
 
-Use a standard password hashing library supported by Python, such as Werkzeug's password hashing utilities.
+Use Argon2id (`argon2-cffi`, OWASP profile). Legacy Werkzeug hashes still verify and are upgraded at the next successful login.
 
 Never:
 - Store plain passwords.
@@ -620,15 +620,7 @@ Recommended validation:
 
 Never use the original filename directly as the storage path.
 
-Store files under:
-
-```text
-uploads/chat/
-uploads/profile/students/
-uploads/profile/faculty/
-```
-
-Store only the relative file path/reference in the database.
+Store file contents in the PostgreSQL table `file_blobs` (bytea) under generated relative keys:```textchat/<uuid>.<ext>profile/students/<uuid>.<ext>profile/faculty/<uuid>.<ext>```Render Free's filesystem is ephemeral, so nothing is written to disk. Caps: 8 MB per chat attachment, 3 MB perprofile picture. Validate extension, size, magic bytes and structure (Pillow decode for images, `%%EOF` for PDF, zipwith `word/` for docx). Store only the relative key in the message/profile row. Swap `services/storage.py`(put/get/delete) for R2/S3 if Neon's 0.5 GB quota gets tight.
 
 ---
 
@@ -1386,14 +1378,13 @@ The application should be deployable as a FastAPI backend (Render) plus a static
 Required project configuration:
 - `requirements.txt`
 - Environment/configuration file or environment variables where needed
-- SQLite database initialization
-- Upload directories
+- Database migrations (`migrations/NNNN_name.sql`, applied automatically at start)- No upload directories (uploads live in PostgreSQL)
 - Secret key configuration
 - Production WSGI entry point where supported
 
 Do not hard-code secrets.
 
-SQLite is acceptable for the intended college project unless deployment requirements later require a server database.
+The database is Neon PostgreSQL (Free). Runtime uses the pooled URL, migrations the direct URL.
 
 ---
 
@@ -1448,5 +1439,53 @@ support login throttling. Data access lives in `models/academic_queries.py`; rul
 `is_student_in_faculty_scope`, used by chat, meeting, supporting-relationship, search and
 profile-approval flows. Schema changes are applied additively and idempotently by
 `models/database.init_db()`. See `DATABASE.md` and `docs/ACADEMIC_HIERARCHY.md`.
-Deployment topology (Render backend with persistent disk, Vercel static + proxy frontend) is
+Deployment topology (Render Free backend with no disk, Neon PostgreSQL, Vercel static + proxy frontend) is
 described in `DEPLOYMENT.md`.
+
+
+---
+
+## Addendum: PostgreSQL / Neon hardening (branch `neon-hardening`)
+
+This addendum supersedes any earlier statement in this document about SQLite, a persistent disk, the Render
+Starter plan, passkeys or temporary admin passwords.
+
+**Stack and topology.** React/Vite SPA on Vercel (`vercel.json` rewrites `/api`, `/uploads`, `/healthz` to Render
+and everything else to `index.html`) -> FastAPI on the Render **Free** plan (no persistent disk, sleeps after ~15
+minutes idle, cold start up to ~60 s; the UI shows a "waking the server" banner and retries idempotent GETs) ->
+**Neon PostgreSQL** (Free). SQLite is gone from the runtime.
+
+**Database layer.** psycopg 3 + psycopg_pool. Runtime uses the pooled Neon URL (`DATABASE_URL_POOLED`, PgBouncer
+transaction mode, prepared statements disabled, TLS via `sslmode=require`, pool max 5 / `DB_POOL_MAX`, connect
+timeout 15 s, retries with backoff, uncommitted work rolled back on return). Migrations use the direct URL
+(`DATABASE_URL`) under an advisory lock and run at app start from `migrations/NNNN_name.sql`, tracked in
+`schema_migrations` (0001 baseline, 0002 invitations/file_blobs/audit_log/presence/session_version, 0003
+unverified typed classes). Timestamps are TEXT `YYYY-MM-DD HH:MM:SS` UTC, case-insensitive columns are `citext`,
+flags are INTEGER 0/1. `models/*.py` keep sqlite-style SQL (`?`, `datetime('now')`) that `api/db.py` translates.
+
+**Uploads** (chat attachments, profile pictures) are stored in `file_blobs` (bytea) via `services/storage.py`
+because Render Free's disk is ephemeral. Caps 8 MB / 3 MB; content validated by extension, size, magic bytes and
+structure. Access control is unchanged. Capacity: Neon Free is 0.5 GB in total; the swap-to-R2/S3 path is the three
+functions in `services/storage.py`.
+
+**Authentication.** E-mail/password only. Argon2id (OWASP profile); legacy werkzeug hashes are upgraded at login.
+Passkeys/WebAuthn removed. Sessions carry `session_version`; password change/reset/deactivation bumps it and ends
+other sessions. Lockout: 5 failures per identifier per 15 min; per-IP hard limit 150; captcha after 10 failures
+per IP.
+
+**Admins.** The primary admin (`PRIMARY_ADMIN_EMAIL`) is bootstrapped with `BOOTSTRAP_ADMIN=1` +
+`ADMIN_NAME/EMAIL/PASSWORD` (Render dashboard only; created only if absent; password never overwritten and dropped
+from the process environment afterwards). It cannot be deactivated or deleted. Further admins are invited by the
+primary admin only: 256-bit single-use token, SHA-256 stored, 72 h default expiry, link
+`PUBLIC_APP_URL/admin-invite#t=<token>`, e-mail via Resend; without mail configuration the API reports
+`email_delivery: "NOT_CONFIGURED"` and returns the one-time link. Admin actions are recorded in `audit_log`.
+
+**Reliability.** Atomic registration/approvals (`db.transaction()`); guarded meeting status transitions
+(`UPDATE ... WHERE status = ...`); `INSERT ... ON CONFLICT DO NOTHING` for chat creation; reminders claimed
+atomically (`claim_meeting_reminder`); persisted, throttled presence (`presence`); faculty `professional_email`
+change updates `users.email` in the same transaction; typed-in classes stored `is_verified=0` until an admin
+verifies them; bounded lists (newest 300 messages per thread request, admin lists capped at 2000); `503` +
+`Retry-After` when the database is unreachable; `409` on unique-violation races.
+
+**Operations and tests.** See DEPLOYMENT.md (free-tier limits, backups, restore, key rotation) and DATABASE.md. Tests
+need a throw-away PostgreSQL server (`TEST_DATABASE_ADMIN_URL`) and never touch Neon production.

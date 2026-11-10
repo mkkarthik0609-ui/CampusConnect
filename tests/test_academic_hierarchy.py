@@ -577,7 +577,7 @@ def test_admin_tree_endpoint_returns_inactive_rows_and_usage(app, admin_client):
     aiml = next(d for d in branches[0]["departments"] if d["name"] == "AIML")
     year3 = next(y for y in aiml["years"] if y["name"] == "3rd Year")
     b = next(s for s in year3["sections"] if s["name"] == "B")
-    assert b == {"id": sid, "name": "B", "is_active": False, "student_count": 1, "assignment_count": 0,
+    assert b == {"id": sid, "name": "B", "is_active": False, "is_verified": True, "student_count": 1, "assignment_count": 0,
                  "can_delete": False}
     assert year3["student_count"] == 1 and year3["is_active"] is True
     assert [s["name"] for s in year3["sections"]] == ["A", "B", "C"]  # public tree would hide B
