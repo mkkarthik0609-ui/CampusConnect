@@ -53,7 +53,7 @@ def test_admin_reads_require_admin_role(app, world, path):
 
 @pytest.mark.parametrize("method,path,payload", [
     ("POST", "/api/admin/permission-requests/1/decide", {"decision": "approve"}),
-    ("POST", "/api/admin/admins", NEW_ADMIN),
+    ("POST", "/api/admin/admin-invitations", NEW_ADMIN),
 ])
 def test_admin_writes_require_admin_role_and_change_nothing(app, world, method, path, payload):
     before = db_count(app, "users")
@@ -233,28 +233,28 @@ def test_student_request_item_shows_usn_and_is_listed_after_pending_ones(app, wo
 
 # ---------------------------------------------------------------- admin accounts
 
-def test_admins_list_and_create(app, world, admin):
+def test_admins_list_and_invite(app, world, admin):
     data = admin.get("/api/admin/admins").json()
     assert data["total"] == 1
     me = data["items"][0]
     assert me["email"] == ADMIN_EMAIL and me["is_you"] is True and me["is_active"] is True
     assert "password_hash" not in me and {"id", "full_name", "created_at", "last_login_at",
                                           "profile_picture_url"} <= set(me)
-    assert me["is_primary"] is True and me["passkey_count"] == 0
+    assert me["is_primary"] is True and "passkey_count" not in me
 
-    resp = api_post(admin, "/api/admin/admins", json=NEW_ADMIN)
+    resp = api_post(admin, "/api/admin/admin-invitations", json=NEW_ADMIN)
     assert resp.status_code == 201, resp.text
     created = resp.json()
-    assert created["admin"]["email"] == "second.admin@college.edu" and created["admin"]["is_primary"] is False
-    assert len(created["temporary_password"]) >= 12
+    assert created["invitation"]["email"] == "second.admin@college.edu" and created["invitation"]["status"] == "PENDING"
+    assert created["email_delivery"] == "NOT_CONFIGURED" and "temporary_password" not in created
     data = admin.get("/api/admin/admins").json()
-    assert data["total"] == 2 and "temporary_password" not in str(data)
+    assert data["total"] == 1  # nobody is an admin until they accept the invitation
 
 
 def test_create_admin_email_must_be_unique_case_insensitively(app, world, admin):
     before = db_count(app, "users")
     for email in (ADMIN_EMAIL, ADMIN_EMAIL.upper(), world["fac"]["email"], world["stu"]["email"]):
-        body = err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, "email": email}), 409, "conflict")
+        body = err(api_post(admin, "/api/admin/admin-invitations", json={**NEW_ADMIN, "email": email}), 409, "conflict")
         assert "email" in body["fields"]
     assert db_count(app, "users") == before
 
@@ -262,18 +262,18 @@ def test_create_admin_email_must_be_unique_case_insensitively(app, world, admin)
 @pytest.mark.parametrize("patch,field", [
     ({"email": "not-an-email"}, "email"),
     ({"email": ""}, "email"),
-    ({"full_name": "   "}, "full_name"),
+    ({"full_name": "x" * 200}, "full_name"),
 ])
-def test_create_admin_validation(app, world, admin, patch, field):
+def test_invite_admin_validation(app, world, admin, patch, field):
     before = db_count(app, "users")
-    body = err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, **patch}), 400, "validation_error")
+    body = err(api_post(admin, "/api/admin/admin-invitations", json={**NEW_ADMIN, **patch}), 400, "validation_error")
     assert field in body["fields"]
     assert db_count(app, "users") == before
 
 
 def test_create_admin_rejects_unknown_and_missing_fields(app, world, admin):
-    err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, "role": "STUDENT"}), 400, "validation_error")
-    err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, "password": "Sup3rSecret!"}), 400, "validation_error")
-    err(api_post(admin, "/api/admin/admins", json={"email": "a@b.co"}), 400, "validation_error")
-    err(api_post(admin, "/api/admin/admins", json={**NEW_ADMIN, "email": 5}), 400, "validation_error")
+    err(api_post(admin, "/api/admin/admin-invitations", json={**NEW_ADMIN, "role": "STUDENT"}), 400, "validation_error")
+    err(api_post(admin, "/api/admin/admin-invitations", json={**NEW_ADMIN, "password": "Sup3rSecret!"}), 400, "validation_error")
+    err(api_post(admin, "/api/admin/admin-invitations", json={"full_name": "x"}), 400, "validation_error")
+    err(api_post(admin, "/api/admin/admin-invitations", json={**NEW_ADMIN, "email": 5}), 400, "validation_error")
     assert db_count(app, "users", "role = 'ADMIN'") == 1

@@ -16,7 +16,7 @@ from tests.conftest import (
 
 S, F = "STUDENT", "FACULTY"
 PREFIXES = ("/api/faculty", "/api/chat", "/api/meetings", "/api/supporting")
-PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+from tests.conftest import REAL_PNG as PNG  # noqa: E402
 
 # (METHOD, path pattern) -> roles allowed. Every route of the four routers must be listed, so a newly added
 # endpoint without an authorisation decision fails test_role_table_covers_every_route.
@@ -389,9 +389,8 @@ def test_only_the_two_participants_can_use_a_chat(app, chatting):
 
 
 def db_all_files(app):
-    import os
-    root = app.state.settings.chat_upload_dir
-    return os.listdir(root) if os.path.isdir(root) else []
+    from tests.conftest import blob_paths
+    return blob_paths(app, "chat/")
 
 
 def test_chat_ids_must_be_integers_and_forged_body_ids_are_rejected(app, chatting):

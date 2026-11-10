@@ -6,6 +6,7 @@ import { AuthProvider } from "@/auth/AuthProvider";
 import { ThemeProvider } from "@/lib/theme";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { WakeBanner } from "@/components/app/WakeBanner";
 import { DialogsProvider } from "@/components/app/dialogs";
 import { AppErrorBoundary } from "@/components/app/ErrorBoundary";
 import { routes } from "@/routes";
@@ -22,6 +23,7 @@ export default function App() {
               <DialogsProvider>
                 <RouterProvider router={router} />
                 <Toaster />
+                <WakeBanner />
               </DialogsProvider>
             </TooltipProvider>
           </ThemeProvider>

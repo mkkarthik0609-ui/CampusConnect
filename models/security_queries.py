@@ -1,6 +1,7 @@
 """Data access for security features: login throttling, captcha challenges, last-login
 tracking and upload authorisation lookups. All timestamps are UTC, formatted like SQLite's
 ``datetime('now')`` ("YYYY-MM-DD HH:MM:SS") so they compare correctly with default column values."""
+import random
 from datetime import datetime, timedelta, timezone
 
 from models.database import get_db
@@ -30,32 +31,7 @@ def parse_ts(value):
 
 
 def ensure_schema():
-    """Idempotent: tables/indexes owned by the security layer (login_attempts lives in schema.sql)."""
-    db = get_db()
-    # E-mail OTP verification was removed (captcha replaced it); drop its leftovers on existing databases.
-    db.execute("DROP TABLE IF EXISTS otp_requests")
-    db.execute("DROP TABLE IF EXISTS otp_sessions")
-    db.execute(
-        """CREATE TABLE IF NOT EXISTS captcha_challenges (
-               id TEXT PRIMARY KEY,
-               answer_hash TEXT NOT NULL,
-               expires_at TEXT NOT NULL,
-               ip TEXT,
-               created_at TEXT NOT NULL DEFAULT (datetime('now'))
-           )"""
-    )
-    db.execute("CREATE INDEX IF NOT EXISTS idx_captcha_ip ON captcha_challenges(ip, created_at)")
-    db.execute(
-        """CREATE TABLE IF NOT EXISTS login_attempts (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               identifier TEXT NOT NULL,
-               ip TEXT,
-               success INTEGER NOT NULL DEFAULT 0,
-               created_at TEXT NOT NULL DEFAULT (datetime('now'))
-           )"""
-    )
-    db.execute("CREATE INDEX IF NOT EXISTS idx_login_attempts_created ON login_attempts(created_at)")
-    db.commit()
+    """Kept for old callers: the schema is created by migrations/0001_baseline.sql."""
 
 
 # ---------- login throttling ----------
@@ -86,8 +62,9 @@ def record_login_attempt(identifier, ip, success):
         "INSERT INTO login_attempts (identifier, ip, success, created_at) VALUES (?, ?, ?, ?)",
         (identifier, ip, 1 if success else 0, fmt(utcnow())),
     )
-    # Keep the table small: nothing older than two days is ever consulted.
-    db.execute("DELETE FROM login_attempts WHERE created_at < ?", (fmt(utcnow() - timedelta(days=2)),))
+    # Keep the table small (nothing older than two days is ever consulted) without a DELETE on every attempt.
+    if random.random() < 0.02:
+        db.execute("DELETE FROM login_attempts WHERE created_at < ?", (fmt(utcnow() - timedelta(days=2)),))
     db.commit()
 
 
@@ -107,58 +84,9 @@ def touch_last_login(user_id):
 
 def set_user_active(user_id, active):
     db = get_db()
-    db.execute("UPDATE users SET is_active = ?, updated_at = datetime('now') WHERE id = ?", (1 if active else 0, user_id))
+    db.execute("UPDATE users SET is_active = ?, session_version = session_version + 1, updated_at = datetime('now') "
+               "WHERE id = ?", (1 if active else 0, user_id))
     db.commit()
-
-
-# ---------- admin passkeys (WebAuthn credentials; credential_id is base64url text) ----------
-
-def create_passkey(user_id, credential_id, public_key, sign_count, transports, label):
-    db = get_db()
-    cur = db.execute(
-        "INSERT INTO admin_passkeys (user_id, credential_id, public_key, sign_count, transports, label) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (user_id, credential_id, public_key, sign_count, transports, label),
-    )
-    db.commit()
-    return cur.lastrowid
-
-
-def get_passkey_by_credential_id(credential_id):
-    return get_db().execute("SELECT * FROM admin_passkeys WHERE credential_id = ?", (credential_id,)).fetchone()
-
-
-def list_passkeys(user_id):
-    return get_db().execute(
-        "SELECT id, credential_id, transports, label, created_at, last_used_at FROM admin_passkeys "
-        "WHERE user_id = ? ORDER BY id", (user_id,),
-    ).fetchall()
-
-
-def count_passkeys(user_id):
-    return get_db().execute("SELECT COUNT(*) AS c FROM admin_passkeys WHERE user_id = ?", (user_id,)).fetchone()["c"]
-
-
-def touch_passkey(passkey_id, sign_count):
-    db = get_db()
-    db.execute("UPDATE admin_passkeys SET sign_count = ?, last_used_at = ? WHERE id = ?",
-               (sign_count, fmt(utcnow()), passkey_id))
-    db.commit()
-
-
-def delete_passkey(passkey_id, user_id):
-    """Delete one passkey owned by `user_id`; returns True if a row was removed."""
-    db = get_db()
-    deleted = db.execute("DELETE FROM admin_passkeys WHERE id = ? AND user_id = ?", (passkey_id, user_id)).rowcount
-    db.commit()
-    return deleted == 1
-
-
-def delete_passkeys_for_user(user_id):
-    db = get_db()
-    deleted = db.execute("DELETE FROM admin_passkeys WHERE user_id = ?", (user_id,)).rowcount
-    db.commit()
-    return deleted
 
 
 # ---------- captcha challenges ----------

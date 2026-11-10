@@ -4,18 +4,16 @@ typing + presence, and the admin read-only viewer. Access rules themselves are c
 test_access_control; here we only re-check that the new endpoints honour them."""
 import io
 import os
-import sqlite3
 
 import pytest
 
-from api.db import _migrate_messages
 from services import presence
 from tests.conftest import (
     ADMIN_EMAIL, api_post, assign, create_admin, create_faculty, create_student, db_count, db_exec, db_one,
     login_client, section_id_for, unassign,
 )
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+from tests.conftest import REAL_PNG as PNG, blob_paths  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -155,7 +153,7 @@ def test_reply_to_another_chat_or_missing_message_is_rejected(app, pair):
                  data={"reply_to_id": str(foreign["id"])})
     assert r.status_code == 400
     assert db_count(app, "messages") == before
-    assert os.listdir(app.state.settings.chat_upload_dir) == [] if os.path.isdir(app.state.settings.chat_upload_dir) else True
+    assert blob_paths(app, "chat/") == []  # the refused reply stored no file
 
 
 def test_reply_with_attachment_and_attachment_quote(app, pair):
@@ -218,12 +216,11 @@ def test_unsend_deletes_the_uploaded_file_and_hides_it_from_everyone(app, pair):
     r = api_post(sc, f"/api/chat/{cid}/messages", files={"attachment": ("notes.png", io.BytesIO(PNG), "image/png")},
                  data={"message_text": "secret caption"})
     item = r.json()["item"]
-    chat_dir = app.state.settings.chat_upload_dir
-    assert len(os.listdir(chat_dir)) == 1 and fc.get(item["attachment"]["url"]).status_code == 200
+    assert len(blob_paths(app, "chat/")) == 1 and fc.get(item["attachment"]["url"]).status_code == 200
 
     done = api_post(sc, f"/api/chat/messages/{item['id']}/unsend").json()["item"]
     assert done["attachment"] is None and done["message_text"] is None
-    assert os.listdir(chat_dir) == []
+    assert blob_paths(app, "chat/") == []
     row = db_one(app, "SELECT * FROM messages")
     assert row["attachment_path"] is None and row["attachment_original_name"] is None and row["message_text"] is None
     assert fc.get(item["attachment"]["url"]).status_code == 404
@@ -469,38 +466,3 @@ def test_admin_messages_typing_and_presence(duo, monkeypatch):
     assert _admin_thread(ac, fid)["chat"]["other"]["typing"] is False
     clock["t"] += presence.TYPING_TTL + 1
     assert _admin_thread(fc, fid)["chat"]["other"]["typing"] is False
-
-
-# ---------------------------------------------------------------------------
-# migration of pre-existing databases
-# ---------------------------------------------------------------------------
-
-def test_migration_rebuilds_legacy_admin_messages_and_is_idempotent():
-    db = sqlite3.connect(":memory:")
-    db.row_factory = sqlite3.Row
-    db.executescript(
-        """CREATE TABLE users (id INTEGER PRIMARY KEY);
-           CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, sender_user_id INTEGER,
-               message_text TEXT, is_seen INTEGER NOT NULL DEFAULT 0, seen_at TEXT, is_edited INTEGER NOT NULL DEFAULT 0,
-               created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
-           CREATE TABLE admin_messages (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-               recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-               message_text TEXT NOT NULL, is_seen INTEGER NOT NULL DEFAULT 0, seen_at TEXT,
-               created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-               CHECK (length(trim(message_text)) > 0));
-           CREATE INDEX idx_admin_messages_pair ON admin_messages(sender_user_id, recipient_user_id, created_at);
-           INSERT INTO users (id) VALUES (1), (2);
-           INSERT INTO admin_messages (sender_user_id, recipient_user_id, message_text, is_seen) VALUES (1, 2, 'old', 1);
-           INSERT INTO messages (chat_id, sender_user_id, message_text) VALUES (1, 1, 'old chat message');"""
-    )
-    for _ in range(2):  # second run must be a no-op
-        _migrate_messages(db)
-    old = db.execute("SELECT * FROM admin_messages").fetchall()
-    assert [(r["message_text"], r["is_seen"], r["is_unsent"]) for r in old] == [("old", 1, 0)]
-    db.execute("UPDATE admin_messages SET message_text = NULL, is_unsent = 1")  # no blank-text CHECK any more
-    cols = {r["name"] for r in db.execute("PRAGMA table_info(messages)")}
-    assert {"delivered_at", "is_unsent", "unsent_at", "reply_to_id", "hidden_by_sender", "hidden_by_recipient"} <= cols
-    assert db.execute("SELECT is_unsent FROM messages").fetchone()["is_unsent"] == 0
-    assert db.execute("SELECT name FROM sqlite_master WHERE name = 'admin_messages_old'").fetchone() is None

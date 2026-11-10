@@ -80,7 +80,6 @@ def main(argv=None, settings=None):
     argv = sys.argv[1:] if argv is None else argv
     settings = settings or Settings.from_env(enable_scheduler=False)
     set_settings(settings)
-    os.makedirs(os.path.dirname(os.path.abspath(settings.database_path)), exist_ok=True)
     init_db(settings)  # make sure the schema exists (idempotent)
     if "--from-env" in argv:
         return _run_from_env(settings)

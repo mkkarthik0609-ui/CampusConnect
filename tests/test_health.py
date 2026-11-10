@@ -14,7 +14,7 @@ def test_health_head_ok(client):
 def test_health_never_touches_the_database(client, monkeypatch):
     def boom(*_a, **_k):
         raise AssertionError("/health must not query the database")
-    monkeypatch.setattr("api.db.connect", boom)
+    monkeypatch.setattr("api.db._checkout", boom)
     assert client.get("/health").status_code == 200
 
 

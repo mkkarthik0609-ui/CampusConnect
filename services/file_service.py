@@ -3,13 +3,16 @@
 The ``upload`` arguments are Starlette/FastAPI ``UploadFile`` objects (anything with ``.filename``
 and a file-like ``.file`` - or ``.stream`` - works). Files are validated by extension, size and magic
 bytes and stored under a random uuid name; the original name is kept only as sanitised metadata."""
+import io
 import os
-import shutil
 import uuid
+import zipfile
 
 from werkzeug.utils import secure_filename
 
 from api.settings import get_settings
+from api.db import get_db
+from services import storage
 
 
 class FileValidationError(Exception):
@@ -24,13 +27,6 @@ def _extension(filename):
 
 def _stream(upload):
     return getattr(upload, "file", None) or upload.stream
-
-
-def _save(upload, dest_path):
-    stream = _stream(upload)
-    stream.seek(0)
-    with open(dest_path, "wb") as out:
-        shutil.copyfileobj(stream, out)
 
 
 def upload_url(relative_path):
@@ -50,95 +46,81 @@ def sanitize_original_name(filename, ext):
     return f"{stem[:80]}.{suffix}"
 
 
-def _magic_bytes_ok(upload, ext):
-    """Lightweight signature check so a renamed .exe can't pass as .pdf/.png/.docx."""
+def _read_bounded(upload, limit):
     stream = _stream(upload)
     stream.seek(0)
-    header = stream.read(8)
+    data = stream.read(limit + 1)
     stream.seek(0)
-    signatures = {
-        "pdf": [b"%PDF-"],
-        "png": [b"\x89PNG\r\n\x1a\n"],
-        "jpg": [b"\xff\xd8\xff"],
-        "jpeg": [b"\xff\xd8\xff"],
-        "docx": [b"PK\x03\x04"],
-    }
-    expected = signatures.get(ext)
-    if not expected:
-        return False
-    return any(header.startswith(sig) for sig in expected)
+    return data
 
 
-def save_chat_attachment(file_storage):
+def _content_ok(data, ext):
+    """Signature + structure check so a renamed .exe / polyglot cannot pass as .pdf/.png/.jpg/.docx."""
+    if ext == "pdf":
+        return data.startswith(b"%PDF-") and b"%%EOF" in data[-2048:]
+    if ext in ("png", "jpg", "jpeg"):
+        sig = b"\x89PNG\r\n\x1a\n" if ext == "png" else b"\xff\xd8\xff"
+        if not data.startswith(sig):
+            return False
+        try:  # must actually decode as an image of the claimed kind
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as im:
+                im.verify()
+                return im.format == ("PNG" if ext == "png" else "JPEG")
+        except Exception:  # noqa: BLE001 - any decoder failure means "not a valid image"
+            return False
+    if ext == "docx":
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                names = set(z.namelist())
+                return "[Content_Types].xml" in names and any(n.startswith("word/") for n in names)
+        except zipfile.BadZipFile:
+            return False
+    return False
+
+
+def _validated_bytes(file_storage, allowed, max_size, too_large, bad_type, empty):
     if not file_storage or not file_storage.filename:
         raise FileValidationError("No file was provided.")
     ext = _extension(secure_filename(file_storage.filename))
-    if ext not in get_settings().allowed_chat_extensions:
-        raise FileValidationError("Unsupported file type. Allowed: PDF, PNG, JPG, JPEG, DOCX.")
-
-    stream = _stream(file_storage)
-    stream.seek(0, os.SEEK_END)
-    size = stream.tell()
-    stream.seek(0)
-    if size > get_settings().max_chat_attachment_size:
-        raise FileValidationError("File is too large. Maximum size is 8 MB.")
-    if size == 0:
-        raise FileValidationError("File is empty.")
-    if not _magic_bytes_ok(file_storage, ext):
+    if ext not in allowed:
+        raise FileValidationError(bad_type)
+    data = _read_bounded(file_storage, max_size)
+    if len(data) > max_size:
+        raise FileValidationError(too_large)
+    if not data:
+        raise FileValidationError(empty)
+    if not _content_ok(data, ext):
         raise FileValidationError("File content does not match its extension.")
+    return ext, data
 
-    generated_name = f"{uuid.uuid4().hex}.{ext}"
-    dest_dir = get_settings().chat_upload_dir
-    os.makedirs(dest_dir, exist_ok=True)
-    dest_path = os.path.join(dest_dir, generated_name)
-    _save(file_storage, dest_path)
 
-    relative_path = os.path.join("chat", generated_name).replace("\\", "/")
+def save_chat_attachment(file_storage):
+    cfg = get_settings()
+    ext, data = _validated_bytes(
+        file_storage, cfg.allowed_chat_extensions, cfg.max_chat_attachment_size,
+        "File is too large. Maximum size is 8 MB.",
+        "Unsupported file type. Allowed: PDF, PNG, JPG, JPEG, DOCX.", "File is empty.")
+    relative_path = f"chat/{uuid.uuid4().hex}.{ext}"
+    storage.put(relative_path, data)  # same transaction as the message row that will reference it
     return relative_path, ext, sanitize_original_name(file_storage.filename, ext)
 
 
 def save_profile_picture(file_storage, role):
-    if not file_storage or not file_storage.filename:
-        raise FileValidationError("No file was provided.")
-    ext = _extension(secure_filename(file_storage.filename))
-    if ext not in get_settings().allowed_image_extensions:
-        raise FileValidationError("Unsupported image type. Allowed: PNG, JPG, JPEG.")
-
-    stream = _stream(file_storage)
-    stream.seek(0, os.SEEK_END)
-    size = stream.tell()
-    stream.seek(0)
-    if size > get_settings().max_profile_picture_size:
-        raise FileValidationError("Image is too large. Maximum size is 3 MB.")
-    if size == 0:
-        raise FileValidationError("Image is empty.")
-    if not _magic_bytes_ok(file_storage, ext):
-        raise FileValidationError("File content does not match its extension.")
-
-    generated_name = f"{uuid.uuid4().hex}.{ext}"
-    dest_dir = (
-        get_settings().profile_student_dir
-        if role == "STUDENT"
-        else get_settings().profile_faculty_dir
-    )
-    os.makedirs(dest_dir, exist_ok=True)
-    dest_path = os.path.join(dest_dir, generated_name)
-    _save(file_storage, dest_path)
-
+    cfg = get_settings()
+    ext, data = _validated_bytes(
+        file_storage, cfg.allowed_image_extensions, cfg.max_profile_picture_size,
+        "Image is too large. Maximum size is 3 MB.",
+        "Unsupported image type. Allowed: PNG, JPG, JPEG.", "Image is empty.")
     subfolder = "students" if role == "STUDENT" else "faculty"
-    relative_path = os.path.join("profile", subfolder, generated_name).replace("\\", "/")
+    relative_path = f"profile/{subfolder}/{uuid.uuid4().hex}.{ext}"
+    storage.put(relative_path, data)
     return relative_path
 
 
 def delete_chat_attachment(relative_path):
-    """Best-effort removal of a stored chat attachment (``chat/<uuid>.<ext>``) once its message is unsent.
-    Only files directly inside the chat upload directory are ever removed."""
-    if not relative_path:
-        return
-    chat_dir = os.path.realpath(get_settings().chat_upload_dir)
-    full = os.path.realpath(os.path.join(get_settings().upload_root, *str(relative_path).split("/")))
-    if os.path.dirname(full) == chat_dir and os.path.isfile(full):
-        try:
-            os.remove(full)
-        except OSError:  # pragma: no cover - the message is already a tombstone; a leftover file is not fatal
-            pass
+    """Remove a stored chat attachment (``chat/<uuid>.<ext>``) once its message is unsent. Only keys under
+    ``chat/`` are ever removed; commits with the caller's transaction."""
+    if relative_path and str(relative_path).startswith("chat/"):
+        storage.delete(str(relative_path))
+        get_db().commit()

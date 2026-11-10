@@ -105,6 +105,12 @@ export const routes = [
       // public landing (also reachable when signed in; its header then offers "Open dashboard")
       { path: "/", element: page(() => import("@/pages/site/Landing")) },
 
+      // public invitation page (token in the URL fragment): reachable signed in or out
+      {
+        element: <AuthLayout />,
+        children: [{ path: "/admin-invite", element: page(() => import("@/pages/site/AdminInvite")) }],
+      },
+
       // guest-only: signed-in users are bounced to their home (or ?next=)
       {
         element: <GuestOnly />,

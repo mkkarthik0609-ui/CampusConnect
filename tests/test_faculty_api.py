@@ -8,7 +8,7 @@ from tests.conftest import (
     api_post, assign, create_admin, create_faculty, create_student, db_one, login_client, section_id_for,
 )
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+from tests.conftest import REAL_PNG as PNG  # noqa: E402
 
 
 @pytest.fixture

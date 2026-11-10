@@ -1,72 +1,328 @@
-"""SQLite access (raw sqlite3, SQLite only).
+"""PostgreSQL access (psycopg 3 + connection pool) behind a small sqlite3-style facade.
 
-Request model: ``DbMiddleware`` (api/security.py) puts an empty ``_Holder`` into a ContextVar for
-every request. ``get_db()`` lazily opens the connection into that holder on first use and the
-middleware closes it when the request ends. Because the *holder* (a mutable object) is what lives
-in the ContextVar, sync ``def`` endpoints and dependencies running in FastAPI's threadpool (which
-copy the context) all see the same connection, and so do the legacy ``models/*queries.py``
-functions that simply call ``get_db()``.
+The query modules (``models/*_queries.py``) were written against ``sqlite3`` (``db.execute(sql, params)``,
+``?`` placeholders, ``row["col"]``, ``cursor.lastrowid``). ``Connection`` keeps that calling convention and
+translates the few SQLite-isms on the fly (see ``translate``), so SQL stays in one place and PostgreSQL does
+the work.
 
-Outside a request (scripts, scheduler, tests, startup) use ``with db_session() as db:``.
+Request model: ``DbMiddleware`` (api/security.py) puts an empty ``_Holder`` into a ContextVar for every
+request. ``get_db()`` lazily checks a connection out of the pool on first use; the middleware returns it
+(rolling back anything uncommitted) when the request ends. Outside a request (scripts, scheduler, tests,
+startup) use ``with db_session() as db:``.
+
+Connections: runtime traffic uses ``database_url`` (Neon's pooled PgBouncer endpoint, transaction mode, so
+no server-side prepared statements); migrations use ``database_url_direct``.
 """
 from __future__ import annotations
 
 import contextlib
 import contextvars
+import functools
+import logging
 import os
-import sqlite3
+import re
+import threading
+import time
 from typing import Iterator, Optional
+
+import psycopg
+from psycopg.types.numeric import FloatLoader, IntDumper
+from psycopg_pool import ConnectionPool, PoolTimeout
 
 from api.settings import Settings, get_settings, use_settings
 
-SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "schema.sql")
+log = logging.getLogger("campusconnect.db")
 
+MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "migrations")
+
+# Re-exported so callers can catch constraint errors without importing psycopg.
+IntegrityError = psycopg.errors.IntegrityError
+UniqueViolation = psycopg.errors.UniqueViolation
+DatabaseError = psycopg.Error
+
+# Tables whose primary key is not an integer ``id`` column (INSERT must not get ``RETURNING id``).
+_NO_ID_TABLES = frozenset({"schema_migrations", "file_blobs", "captcha_challenges", "presence"})
+
+
+# ---------------------------------------------------------------------------------------
+# SQL translation (SQLite dialect -> PostgreSQL)
+
+_INSERT_RE = re.compile(r"^\s*INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+
+
+@functools.lru_cache(maxsize=2048)
+def translate(sql: str) -> tuple[str, bool]:
+    """Returns ``(postgres_sql, wants_lastrowid)``.
+
+    * ``?`` -> ``%s`` (outside string literals); literal ``%`` -> ``%%``.
+    * ``datetime('now')`` -> ``cc_now()`` (UTC ``YYYY-MM-DD HH:MM:SS`` text, same shape SQLite produced).
+    * ``LIKE`` -> ``ILIKE`` (SQLite's LIKE is case-insensitive for ASCII).
+    * ``COLLATE NOCASE`` is dropped: the case-insensitive columns are ``citext``.
+    * ``INSERT`` without ``RETURNING`` gets ``RETURNING id`` so ``cursor.lastrowid`` keeps working.
+    """
+    out: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch == "'":
+            j = i + 1
+            while j < n:
+                if sql[j] == "'":
+                    if j + 1 < n and sql[j + 1] == "'":
+                        j += 2
+                        continue
+                    break
+                j += 1
+            out.append(sql[i:j + 1].replace("%", "%%"))
+            i = j + 1
+            continue
+        if ch == "?":
+            out.append("%s")
+        elif ch == ":" and i + 1 < n and (sql[i + 1].isalpha() or sql[i + 1] == "_") and (i == 0 or sql[i - 1] != ":"):
+            j = i + 1
+            while j < n and (sql[j].isalnum() or sql[j] == "_"):
+                j += 1
+            out.append("%(" + sql[i + 1:j] + ")s")  # sqlite named parameter  :name  ->  %(name)s
+            i = j
+            continue
+        elif ch == "%":
+            out.append("%%")
+        else:
+            out.append(ch)
+        i += 1
+    text = "".join(out)
+    text = re.sub(r"datetime\(\s*'now'\s*\)", "cc_now()", text, flags=re.IGNORECASE)
+    text = re.sub(r"datetime\(\s*'now'\s*,\s*('[^']*')\s*\)", r"cc_now(\1)", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+COLLATE\s+NOCASE\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<![A-Za-z_])(NOT\s+)?LIKE\b", lambda m: (m.group(1) or "") + "ILIKE", text, flags=re.IGNORECASE)
+    wants = False
+    m = _INSERT_RE.match(text)
+    if m and "RETURNING" not in text.upper() and m.group(1).lower() not in _NO_ID_TABLES:
+        text = text.rstrip().rstrip(";") + " RETURNING id"
+        wants = True
+    return text, wants
+
+
+# ---------------------------------------------------------------------------------------
+# rows / cursors
+
+class Row(tuple):
+    """Tuple that also answers ``row["column"]`` and ``row.keys()`` (like ``sqlite3.Row``)."""
+
+    def __new__(cls, index: dict, values):
+        obj = super().__new__(cls, values)
+        obj._index = index
+        return obj
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return tuple.__getitem__(self, self._index[key])
+        return tuple.__getitem__(self, key)
+
+    def keys(self):
+        return list(self._index)
+
+    def get(self, key, default=None):
+        return tuple.__getitem__(self, self._index[key]) if key in self._index else default
+
+
+def _row_factory(cursor):
+    desc = cursor.description
+    if desc is None:
+        return lambda values: values
+    index: dict = {}
+    for pos, col in enumerate(desc):
+        index.setdefault(col.name, pos)
+    return lambda values: Row(index, values)
+
+
+class Cursor:
+    """Thin wrapper adding ``lastrowid`` and sqlite-style ``fetch*``."""
+
+    def __init__(self, cur: psycopg.Cursor, wants_lastrowid: bool):
+        self._cur = cur
+        self.lastrowid: Optional[int] = None
+        if wants_lastrowid:
+            row = cur.fetchone() if cur.description else None
+            self.lastrowid = row[0] if row else None
+
+    @property
+    def rowcount(self) -> int:
+        return self._cur.rowcount
+
+    def fetchone(self):
+        return self._cur.fetchone() if self._cur.description else None
+
+    def fetchall(self):
+        return self._cur.fetchall() if self._cur.description else []
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
+class Connection:
+    """sqlite3-like facade over a pooled psycopg connection."""
+
+    def __init__(self, raw: psycopg.Connection):
+        self._raw = raw
+        self._depth = 0
+
+    def execute(self, sql: str, params=()) -> Cursor:
+        text, wants = translate(sql)
+        bound = params if isinstance(params, dict) else (tuple(params) if params else None)
+        cur = self._raw.execute(text, bound)
+        return Cursor(cur, wants)
+
+    def executemany(self, sql: str, seq) -> None:
+        text, _ = translate(sql)
+        with self._raw.cursor() as cur:
+            cur.executemany(text, [tuple(p) for p in seq])
+
+    def commit(self) -> None:
+        if self._depth == 0:  # inside ``transaction()`` the helpers' own commits are deferred to its exit
+            self._raw.commit()
+
+    @contextlib.contextmanager
+    def transaction(self):
+        """All-or-nothing block: commits made by the query helpers inside it are deferred and applied once, on
+        a clean exit; any exception rolls the whole block back. Nestable (only the outermost block commits)."""
+        self._depth += 1
+        try:
+            yield self
+        except BaseException:
+            self._depth -= 1
+            if self._depth == 0:
+                self._raw.rollback()
+            raise
+        else:
+            self._depth -= 1
+            if self._depth == 0:
+                self._raw.commit()
+
+    def rollback(self) -> None:
+        self._raw.rollback()
+
+    @property
+    def raw(self) -> psycopg.Connection:
+        return self._raw
+
+
+def _configure(conn: psycopg.Connection) -> None:
+    conn.row_factory = _row_factory  # type: ignore[assignment]
+    conn.prepare_threshold = None  # PgBouncer transaction pooling cannot keep prepared statements
+    conn.adapters.register_loader("numeric", FloatLoader)  # SUM()/AVG() -> float, JSON friendly
+    conn.adapters.register_dumper(bool, IntDumper)  # flags are INTEGER 0/1 columns
+
+
+# ---------------------------------------------------------------------------------------
+# pools
+
+_pools: dict[str, ConnectionPool] = {}
+_pools_lock = threading.Lock()
+
+
+def _pool_for(settings: Settings) -> ConnectionPool:
+    url = settings.database_url
+    if not url:
+        raise RuntimeError("DATABASE_URL_POOLED (or DATABASE_URL) is not configured.")
+    pool = _pools.get(url)
+    if pool is not None:
+        return pool
+    with _pools_lock:
+        pool = _pools.get(url)
+        if pool is None:
+            pool = ConnectionPool(
+                url,
+                min_size=settings.db_pool_min,
+                max_size=settings.db_pool_max,
+                timeout=settings.db_pool_timeout,
+                max_lifetime=600,   # recycle: Neon/PgBouncer drop long-lived idle sessions
+                max_idle=120,
+                check=ConnectionPool.check_connection,  # drop connections the server closed while idle
+                kwargs={"connect_timeout": settings.db_connect_timeout, "application_name": "campusconnect"},
+                configure=_configure,
+                open=False,
+            )
+            pool.open()
+            _pools[url] = pool
+    return pool
+
+
+def dispose_pools(url: Optional[str] = None) -> None:
+    """Close pools (tests drop their database afterwards; ``None`` closes all)."""
+    with _pools_lock:
+        for key in [url] if url else list(_pools):
+            pool = _pools.pop(key, None)
+            if pool is not None:
+                pool.close()
+
+
+def _checkout(settings: Settings):
+    """Get a pooled connection, retrying transient connect failures (Neon cold start / network blips)."""
+    pool = _pool_for(settings)
+    last: Optional[Exception] = None
+    for attempt in range(settings.db_connect_retries):
+        try:
+            return pool, pool.getconn()
+        except (psycopg.OperationalError, PoolTimeout) as exc:
+            last = exc
+            log.warning("database checkout failed (attempt %d): %s", attempt + 1, type(exc).__name__)
+            time.sleep(min(0.5 * 2 ** attempt, 4))
+    raise last  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------------------
+# request / session holder
 
 class _Holder:
-    __slots__ = ("conn", "settings")
+    __slots__ = ("conn", "pool", "settings", "after_close")
 
     def __init__(self, settings: Optional[Settings] = None):
-        self.conn: Optional[sqlite3.Connection] = None
+        self.after_close: list = []
+        self.conn: Optional[Connection] = None
+        self.pool: Optional[ConnectionPool] = None
         self.settings = settings
 
     def close(self) -> None:
-        conn, self.conn = self.conn, None
-        if conn is not None:
+        conn, pool = self.conn, self.pool
+        self.conn = self.pool = None
+        if conn is not None and pool is not None:
             try:
-                conn.close()
-            except sqlite3.Error:  # pragma: no cover
-                pass
+                raw = conn.raw
+                if not raw.closed and raw.info.transaction_status != psycopg.pq.TransactionStatus.IDLE:
+                    raw.rollback()  # nothing uncommitted may leak into the next request that reuses the connection
+                for sql, params in self.after_close:  # deferred autonomous writes (e.g. presence), own transaction
+                    raw.execute(sql, params)
+                    raw.commit()
+                pool.putconn(raw)
+            except Exception:  # noqa: BLE001  pragma: no cover
+                log.exception("failed to return database connection to pool")
 
 
 _holder_var: contextvars.ContextVar = contextvars.ContextVar("cc_db_holder", default=None)
 
 
-def connect(settings: Optional[Settings] = None) -> sqlite3.Connection:
-    """Open a new configured connection (caller owns it)."""
-    settings = settings or get_settings()
-    conn = sqlite3.connect(
-        settings.database_path,
-        detect_types=sqlite3.PARSE_DECLTYPES,
-        timeout=15,
-        # A request's connection may be touched by more than one threadpool thread, one at a time.
-        check_same_thread=False,
-    )
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 15000")
-    return conn
-
-
-def get_db() -> sqlite3.Connection:
-    """The current request's (or ``db_session``'s) connection, opened lazily."""
+def get_db() -> Connection:
+    """The current request's (or ``db_session``'s) connection, checked out lazily."""
     holder = _holder_var.get()
     if holder is None:
         raise RuntimeError(
             "get_db() called outside a request or db_session(); wrap scripts in `with db_session():`."
         )
     if holder.conn is None:
-        holder.conn = connect(holder.settings)
+        holder.pool, raw = _checkout(holder.settings or get_settings())
+        holder.conn = Connection(raw)
     return holder.conn
+
+
+def defer_write(sql: str, params: tuple = ()) -> bool:
+    """Queue a small, independent write (already PostgreSQL SQL, ``%s`` placeholders) to run in its OWN
+    transaction right after this request's work is rolled back/finished. False when there is no db context."""
+    holder = _holder_var.get()
+    if holder is None:
+        return False
+    holder.after_close.append((sql, params))
+    return True
 
 
 def has_db_context() -> bool:
@@ -85,9 +341,9 @@ def close_holder(holder: _Holder, token) -> None:
 
 
 @contextlib.contextmanager
-def db_session(settings: Optional[Settings] = None) -> Iterator[sqlite3.Connection]:
+def db_session(settings: Optional[Settings] = None) -> Iterator[Connection]:
     """Scripts / scheduler / tests: ``with db_session() as db: queries.create_user(...)``.
-    Also binds the settings for the block. The connection is closed on exit."""
+    Also binds the settings for the block. The connection goes back to the pool on exit."""
     settings = settings or get_settings()
     holder = _Holder(settings)
     token = _holder_var.set(holder)
@@ -99,138 +355,83 @@ def db_session(settings: Optional[Settings] = None) -> Iterator[sqlite3.Connecti
         _holder_var.reset(token)
 
 
+def check_connection(settings: Optional[Settings] = None) -> bool:
+    """Cheap liveness probe for /healthz?deep=1 (never raises)."""
+    try:
+        with db_session(settings) as db:
+            db.execute("SELECT 1").fetchone()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ---------------------------------------------------------------------------------------
-# schema / migrations / seed
+# migrations (direct connection) + seed
 
-def _columns(db: sqlite3.Connection, table: str) -> set:
-    return {r["name"] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
-
-
-def _migrate(db: sqlite3.Connection) -> None:
-    """Additive, idempotent migrations for databases created before the academic hierarchy."""
-    if "section_id" not in _columns(db, "students"):
-        db.execute("ALTER TABLE students ADD COLUMN section_id INTEGER REFERENCES sections(id) ON DELETE SET NULL")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_students_section ON students(section_id)")
-    if "last_login_at" not in _columns(db, "users"):
-        db.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT")
-    if "note" not in _columns(db, "supporting_relationships"):
-        db.execute("ALTER TABLE supporting_relationships ADD COLUMN note TEXT")
-    db.execute(
-        """CREATE TABLE IF NOT EXISTS admin_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            message_text TEXT NOT NULL,
-            is_seen INTEGER NOT NULL DEFAULT 0,
-            seen_at TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-            CHECK (length(trim(message_text)) > 0)
-        )"""
-    )
-    db.execute("CREATE INDEX IF NOT EXISTS idx_admin_messages_pair ON admin_messages(sender_user_id, recipient_user_id, created_at)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_admin_messages_recipient ON admin_messages(recipient_user_id, is_seen, created_at)")
-    db.execute(
-        """CREATE TABLE IF NOT EXISTS admin_passkeys (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            credential_id TEXT NOT NULL UNIQUE,
-            public_key BLOB NOT NULL,
-            sign_count INTEGER NOT NULL DEFAULT 0,
-            transports TEXT,
-            label TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            last_used_at TEXT
-        )"""
-    )
-    db.execute("CREATE INDEX IF NOT EXISTS idx_admin_passkeys_user ON admin_passkeys(user_id)")
+def _migration_files() -> list[tuple[int, str, str]]:
+    files = []
+    for name in sorted(os.listdir(MIGRATIONS_DIR)):
+        m = re.match(r"^(\d{4})_([a-z0-9_]+)\.sql$", name)
+        if m:
+            files.append((int(m.group(1)), m.group(2), os.path.join(MIGRATIONS_DIR, name)))
+    return files
 
 
-def _reconcile_primary_admin(db: sqlite3.Connection, settings: Settings) -> None:
-    """The primary admin can never stay deactivated (an existing admin row is re-activated at start)."""
-    db.execute(
-        "UPDATE users SET is_active = 1, updated_at = datetime('now') "
-        "WHERE role = 'ADMIN' AND is_active = 0 AND lower(email) = ?",
-        (settings.primary_admin_email.strip().lower(),),
-    )
-
-
-_ADMIN_MESSAGES_DDL = """CREATE TABLE IF NOT EXISTS admin_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    message_text TEXT,
-    is_seen INTEGER NOT NULL DEFAULT 0,
-    seen_at TEXT,
-    delivered_at TEXT,
-    is_edited INTEGER NOT NULL DEFAULT 0,
-    is_unsent INTEGER NOT NULL DEFAULT 0,
-    unsent_at TEXT,
-    reply_to_id INTEGER REFERENCES admin_messages(id) ON DELETE SET NULL,
-    hidden_by_sender INTEGER NOT NULL DEFAULT 0,
-    hidden_by_recipient INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-)"""
-_NEW_MESSAGE_COLUMNS = {
-    "delivered_at": "TEXT",
-    "is_unsent": "INTEGER NOT NULL DEFAULT 0",
-    "unsent_at": "TEXT",
-    "reply_to_id": "INTEGER REFERENCES {table}(id) ON DELETE SET NULL",
-    "hidden_by_sender": "INTEGER NOT NULL DEFAULT 0",
-    "hidden_by_recipient": "INTEGER NOT NULL DEFAULT 0",
-}
-
-
-def _migrate_messages(db: sqlite3.Connection) -> None:
-    """WhatsApp-style messaging columns (delivery, unsend, reply, delete-for-me) on ``messages`` and
-    ``admin_messages``. Idempotent. Runs after schema.sql, so indexes on the new columns live here."""
-    row = db.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'admin_messages'").fetchone()
-    if row and "CHECK (length(trim(message_text))" in (row[0] or ""):
-        # An unsent message has no text, so the old non-blank CHECK has to go: SQLite can only do that by rebuilding.
-        db.execute("DROP INDEX IF EXISTS idx_admin_messages_pair")
-        db.execute("DROP INDEX IF EXISTS idx_admin_messages_recipient")
-        db.execute("ALTER TABLE admin_messages RENAME TO admin_messages_old")
-        db.execute(_ADMIN_MESSAGES_DDL)
-        db.execute(
-            """INSERT INTO admin_messages (id, sender_user_id, recipient_user_id, message_text, is_seen, seen_at,
-                                           created_at, updated_at)
-               SELECT id, sender_user_id, recipient_user_id, message_text, is_seen, seen_at, created_at, updated_at
-               FROM admin_messages_old"""
+def run_migrations(settings: Optional[Settings] = None) -> list[int]:
+    """Apply pending ``migrations/NNNN_name.sql`` files in order, each in its own transaction, over the
+    DIRECT connection (DDL + locks are not safe through a transaction-mode pooler). Safe to call from
+    several instances at once: a transaction-level advisory lock serialises them. Returns the versions
+    applied by this call."""
+    settings = settings or get_settings()
+    url = settings.database_url_direct or settings.database_url
+    if not url:
+        raise RuntimeError("DATABASE_URL is not configured.")
+    applied: list[int] = []
+    last: Optional[Exception] = None
+    conn = None
+    for attempt in range(settings.db_connect_retries):
+        try:
+            conn = psycopg.connect(url, autocommit=True, connect_timeout=settings.db_connect_timeout)
+            break
+        except psycopg.OperationalError as exc:
+            last = exc
+            time.sleep(min(0.5 * 2 ** attempt, 4))
+    if conn is None:
+        raise last  # type: ignore[misc]
+    with conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations ("
+            " version INTEGER PRIMARY KEY, name TEXT NOT NULL,"
+            " applied_at TEXT NOT NULL DEFAULT to_char(timezone('utc', clock_timestamp()), 'YYYY-MM-DD HH24:MI:SS'))"
         )
-        db.execute("DROP TABLE admin_messages_old")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_admin_messages_pair ON admin_messages(sender_user_id, recipient_user_id, created_at)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_admin_messages_recipient ON admin_messages(recipient_user_id, is_seen, created_at)")
-    for table in ("messages", "admin_messages"):
-        have = _columns(db, table)
-        wanted = dict(_NEW_MESSAGE_COLUMNS)
-        if table == "admin_messages":
-            wanted["is_edited"] = "INTEGER NOT NULL DEFAULT 0"
-        for name, ddl in wanted.items():
-            if name not in have:
-                db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl.format(table=table)}")
-        db.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_updated ON {table}(updated_at)")
+        for version, name, path in _migration_files():
+            with conn.transaction():
+                conn.execute("SELECT pg_advisory_xact_lock(727274)")
+                if conn.execute("SELECT 1 FROM schema_migrations WHERE version = %s", (version,)).fetchone():
+                    continue
+                with open(path, "r", encoding="utf-8") as f:
+                    conn.execute(f.read())  # type: ignore[arg-type]
+                conn.execute("INSERT INTO schema_migrations (version, name) VALUES (%s, %s)", (version, name))
+                applied.append(version)
+                log.info("applied migration %04d_%s", version, name)
+    return applied
+
+
+def schema_version(settings: Optional[Settings] = None) -> int:
+    with db_session(settings) as db:
+        row = db.execute("SELECT COALESCE(MAX(version), 0) AS v FROM schema_migrations").fetchone()
+        return int(row["v"])
 
 
 def init_db(settings: Optional[Settings] = None) -> None:
-    """Create/upgrade the schema and seed the default academic structure. Idempotent; safe at every start."""
+    """Migrate the schema and seed the default academic structure. Idempotent; safe at every start."""
     settings = settings or get_settings()
-    db_dir = os.path.dirname(os.path.abspath(settings.database_path))
-    os.makedirs(db_dir, exist_ok=True)
+    run_migrations(settings)
     with db_session(settings) as db:
-        if settings.database_path != ":memory:":
-            try:
-                db.execute("PRAGMA journal_mode = WAL")
-            except sqlite3.DatabaseError:  # pragma: no cover
-                pass
-        with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
-            db.executescript(f.read())
-        _migrate(db)
-        _migrate_messages(db)
-        _reconcile_primary_admin(db, settings)
+        # The primary admin can never stay deactivated (an existing admin row is re-activated at start).
+        db.execute("UPDATE users SET is_active = 1, updated_at = datetime('now') "
+                   "WHERE role = 'ADMIN' AND is_active = 0 AND email = ?", (settings.primary_admin_email,))
         db.commit()
-        from models import security_queries
-        security_queries.ensure_schema()
         from services import academic_service
         academic_service.seed_default_structure()
         if settings.seed_extra_branches:

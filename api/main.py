@@ -32,7 +32,7 @@ logger = logging.getLogger("campusconnect.api")
 # Registered in this order. Modules that do not exist yet are skipped (see _register_routers).
 ROUTER_MODULES = [
     "system", "auth", "account", "academic", "notifications", "uploads",
-    "admin", "admin_academic", "admin_passkeys", "admin_messages", "faculty", "student", "chat", "meetings", "supporting", "research",
+    "admin", "admin_academic", "admin_messages", "faculty", "student", "chat", "meetings", "supporting", "research",
 ]
 
 
@@ -68,10 +68,7 @@ def _register_routers(app: FastAPI) -> None:
 
 
 def _prepare_storage_and_db(settings: Settings) -> None:
-    for path in (settings.upload_root, settings.profile_student_dir, settings.profile_faculty_dir,
-                 settings.chat_upload_dir):
-        os.makedirs(path, exist_ok=True)
-    dbmod.init_db(settings)  # idempotent (CREATE IF NOT EXISTS + additive migrations + academic seed)
+    dbmod.init_db(settings)  # idempotent (versioned SQL migrations + academic seed)
     if settings.bootstrap_admin and not settings.testing:
         from services import auth_service
         try:
@@ -95,7 +92,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         scheduler = None
         if settings.enable_scheduler and not settings.testing:
-            # Exactly one process runs the app (SQLite single writer), so one scheduler is safe.
+            # One process runs the app on Render; reminders are additionally claimed atomically in SQL.
             from apscheduler.schedulers.background import BackgroundScheduler
             from services.meeting_service import send_due_reminders
 

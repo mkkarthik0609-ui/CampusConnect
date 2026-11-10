@@ -10,7 +10,7 @@ from tests.conftest import (
     section_id_for, unassign,
 )
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+from tests.conftest import REAL_PNG as PNG  # noqa: E402
 
 
 @pytest.fixture

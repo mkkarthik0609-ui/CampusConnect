@@ -39,15 +39,11 @@ export const authApi = {
     return data;
   },
 
-  /** POST /api/auth/admin-passkey/options -> { options } WebAuthn assertion options (discoverable credentials) */
-  adminPasskeyOptions: () => api.post("/api/auth/admin-passkey/options", {}, { skipAuthRedirect: true }),
+  /** POST /api/auth/admin-invite/inspect { token } -> { email, full_name, expires_at } (400 when invalid / expired) */
+  inspectAdminInvite: (token) => api.post("/api/auth/admin-invite/inspect", { token }, { skipAuthRedirect: true }),
 
-  /** POST /api/auth/admin-passkey/verify { credential, identifier? } -> same response as admin-login */
-  async adminPasskeyLogin({ credential, identifier }) {
-    const data = await api.post("/api/auth/admin-passkey/verify", { credential, identifier: identifier || "" }, { skipAuthRedirect: true });
-    setCsrfToken(data?.csrf_token);
-    return data;
-  },
+  /** POST /api/auth/admin-invite/accept { token, full_name, password, confirm_password } -> 201 { message } (no auto-login) */
+  acceptAdminInvite: (body) => api.post("/api/auth/admin-invite/accept", body, { skipAuthRedirect: true }),
 
   /** POST /api/auth/logout -> { ok, message, csrf_token } */
   async logout() {

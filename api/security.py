@@ -4,11 +4,13 @@ Stack (outermost first), assembled in ``api.main.create_app``::
 
     ProxyHeadersMiddleware   (only when settings.trust_proxy)  client ip / scheme / host from X-Forwarded-*
     SecurityMiddleware       security headers, no-store on /api, 10 MB cap, JSON 500 safety net
-    DbMiddleware             binds settings + opens/closes the per-request sqlite3 connection holder
+    DbMiddleware             binds settings + opens/closes the per-request database connection holder
     SessionMiddleware        signed ``cc_session`` cookie -> request.session
     FastAPI app              (global csrf_protect dependency, routers, error handlers)
 """
 from __future__ import annotations
+
+import anyio
 
 import hmac
 import json
@@ -166,7 +168,7 @@ class SecurityMiddleware:
 # per-request database holder
 
 class DbMiddleware:
-    """Binds the app's settings and a lazily-opened sqlite3 connection to the request context."""
+    """Binds the app's settings and a lazily-checked-out PostgreSQL connection to the request context."""
 
     def __init__(self, app: ASGIApp, settings: Settings):
         self.app = app
@@ -181,4 +183,7 @@ class DbMiddleware:
             try:
                 await self.app(scope, receive, send)
             finally:
-                dbmod.close_holder(holder, token)
+                # Returning the connection rolls back any open read transaction (a network round trip):
+                # do it off the event loop.
+                await anyio.to_thread.run_sync(holder.close)
+                dbmod._holder_var.reset(token)

@@ -50,7 +50,7 @@ def list_students(section_id=None):
     if section_id is not None:
         sql += " WHERE st.section_id = ?"
         params = (section_id,)
-    return get_db().execute(sql + " ORDER BY u.is_active DESC, u.full_name COLLATE NOCASE, st.id", params).fetchall()
+    return get_db().execute(sql + " ORDER BY u.is_active DESC, lower(u.full_name), st.id", params).fetchall()
 
 
 def get_student(student_id):
@@ -67,7 +67,7 @@ def list_faculty():
     return get_db().execute(
         """SELECT f.id, f.user_id, f.faculty_code, f.department, f.professional_email, f.created_at,
                   u.full_name, u.email, u.is_active, u.profile_picture_path, u.last_login_at
-           FROM faculty f JOIN users u ON u.id = f.user_id ORDER BY u.full_name COLLATE NOCASE, f.id"""
+           FROM faculty f JOIN users u ON u.id = f.user_id ORDER BY lower(u.full_name), f.id"""
     ).fetchall()
 
 

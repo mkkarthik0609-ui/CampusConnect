@@ -1,6 +1,5 @@
 """Core plumbing tests: settings, db holder/sessions, error mapping, router registration, public
 endpoints (academic tree, notifications, meta), serializers."""
-import sqlite3
 import threading
 
 import pytest
@@ -33,9 +32,9 @@ def err(resp):
 
 def test_settings_defaults_are_environment_independent(monkeypatch):
     monkeypatch.setenv("CAPTCHA_MAX_PER_IP_PER_HOUR", "1")
-    monkeypatch.setenv("DATABASE_PATH", "/elsewhere.db")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://elsewhere/db")
     s = Settings()
-    assert s.captcha_max_per_ip_per_hour == 60 and s.database_path != "/elsewhere.db"
+    assert s.captcha_max_per_ip_per_hour == 60 and s.database_url == ""
     assert s.csrf_enabled and s.session_cookie_name == "cc_session"
     assert s.max_request_bytes == 10 * 1024 * 1024
     assert s.session_idle_timeout_minutes == 60 and s.session_lifetime_seconds == 12 * 3600
@@ -43,8 +42,8 @@ def test_settings_defaults_are_environment_independent(monkeypatch):
 
 def test_settings_from_env(monkeypatch, tmp_path):
     for k, v in {
-        "APP_ENV": "production", "SECRET_KEY": "k" * 32, "DATABASE_PATH": str(tmp_path / "x.db"),
-        "UPLOAD_ROOT": str(tmp_path / "up"), "TRUST_PROXY": "1", "TRUST_PROXY_HOPS": "2",
+        "APP_ENV": "production", "SECRET_KEY": "k" * 32, "DATABASE_URL": "postgresql://direct/db",
+        "DATABASE_URL_POOLED": "postgresql://pooled/db", "TRUST_PROXY": "1", "TRUST_PROXY_HOPS": "2",
         "CAPTCHA_MAX_PER_IP_PER_HOUR": "9", "ENABLE_SCHEDULER": "0", "BOOTSTRAP_ADMIN": "yes",
         "LOGIN_MAX_FAILURES_PER_IDENTIFIER": "7", "LOGIN_CAPTCHA_AFTER_FAILURES": "oops", "DEBUG": "1",
     }.items():
@@ -57,8 +56,7 @@ def test_settings_from_env(monkeypatch, tmp_path):
     assert s.login_max_failures_per_identifier == 7
     assert s.login_captcha_after_failures == 3  # unparsable -> default
     assert not s.debug and not s.docs_enabled  # never debug in production
-    assert s.chat_upload_dir == str(tmp_path / "up" / "chat")
-    assert s.profile_student_dir.endswith("students") and s.profile_faculty_dir.endswith("faculty")
+    assert s.database_url == "postgresql://pooled/db" and s.database_url_direct == "postgresql://direct/db"
     s.validate()
 
 
@@ -79,14 +77,14 @@ def test_get_settings_follows_the_request_and_session_context(tmp_path):
     # two apps alive at once keep their own settings/database per request
     ca, cb = TestClient(a), TestClient(b)
     assert ca.get("/api/auth/captcha").status_code == 200 and cb.get("/api/auth/captcha").status_code == 200
-    assert db_count(a, "captcha_challenges") == 1 and db_count(b, "captcha_challenges") == 1
+    assert db_count(a, "captcha_challenges") == 2  # both apps share the one test database
     with use_settings(a.state.settings):
         assert get_settings().captcha_length == 4
 
 
 def test_testing_settings_get_a_random_secret_when_none_given(tmp_path):
-    app = create_app(Settings(testing=True, enable_scheduler=False, database_path=str(tmp_path / "t.db"),
-                              upload_root=str(tmp_path / "u"), frontend_dist=str(tmp_path / "nope")))
+    app = create_app(Settings(testing=True, enable_scheduler=False, database_url=make_settings(tmp_path).database_url,
+                              frontend_dist=str(tmp_path / "nope")))
     assert len(app.state.settings.secret_key) >= 32
 
 
@@ -101,13 +99,12 @@ def test_get_db_outside_a_session_is_an_error():
 
 def test_db_session_config_and_close(app):
     with dbmod.db_session(app.state.settings) as db:
-        assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
-        assert db.execute("PRAGMA busy_timeout").fetchone()[0] == 15000
-        assert db.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        assert db.execute("SHOW application_name").fetchone()[0] == "campusconnect"
         assert dbmod.get_db() is db
-        assert isinstance(db.execute("SELECT 1 AS x").fetchone(), sqlite3.Row)
-    with pytest.raises(sqlite3.ProgrammingError):
-        db.execute("SELECT 1")
+        row = db.execute("SELECT 1 AS x").fetchone()
+        assert isinstance(row, dbmod.Row) and row["x"] == 1 and row[0] == 1 and row.keys() == ["x"]
+        holder = dbmod._holder_var.get()
+    assert holder.conn is None  # returned to the pool
     assert not dbmod.has_db_context()
 
 
@@ -132,15 +129,14 @@ def test_one_connection_per_request_shared_across_threadpool_and_closed(app):
         holder = dbmod._holder_var.get()
         seen.append(("holder", id(holder.conn), 0))
         db.execute("SELECT 1")
-        app.state.last_conn = db
+        app.state.last_holder = holder
         return {"ok": True}
 
     app.include_router(router)
     c = TestClient(app)
     assert c.get("/api/_core/conn").status_code == 200
     assert len({entry[1] for entry in seen}) == 1  # same connection everywhere
-    with pytest.raises(sqlite3.ProgrammingError):  # closed when the request ended
-        app.state.last_conn.execute("SELECT 1")
+    assert app.state.last_holder.conn is None  # returned to the pool when the request ended
     c.get("/api/_core/conn")
     assert seen[-1][1] != seen[0][1]  # a new request gets a new connection
 
@@ -150,14 +146,14 @@ def test_connection_is_closed_even_when_the_endpoint_fails(app):
 
     @router.get("/fail")
     def fail():
-        app.state.last_conn = dbmod.get_db()
+        dbmod.get_db()
+        app.state.last_holder = dbmod._holder_var.get()
         raise ApiError(418, "teapot", "short and stout")
 
     app.include_router(router)
     resp = TestClient(app).get("/api/_core/fail")
     assert resp.status_code == 418 and err(resp) == {"code": "teapot", "message": "short and stout"}
-    with pytest.raises(sqlite3.ProgrammingError):
-        app.state.last_conn.execute("SELECT 1")
+    assert app.state.last_holder.conn is None
 
 
 def test_init_db_is_idempotent_and_seeds_default_hierarchy(app):
@@ -168,22 +164,17 @@ def test_init_db_is_idempotent_and_seeds_default_hierarchy(app):
     assert db_count(app, "sections") == before and db_count(app, "branches") == 1
 
 
-def test_init_db_migrates_an_old_database(tmp_path):
-    path = tmp_path / "old.db"
-    legacy = sqlite3.connect(path)
-    legacy.executescript("""
-        CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL, email TEXT UNIQUE NOT NULL,
-          password_hash TEXT NOT NULL, full_name TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1,
-          theme_preference TEXT NOT NULL DEFAULT 'light', profile_picture_path TEXT,
-          created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')));
-    """)
-    legacy.commit()
-    legacy.close()
-    settings = make_settings(tmp_path, database_path=str(path))
-    app = create_app(settings)
-    cols = {r["name"] for r in dbmod.connect(settings).execute("PRAGMA table_info(users)").fetchall()}
-    assert "last_login_at" in cols
-    assert db_count(app, "sections") > 0
+def test_uncommitted_work_is_rolled_back_when_the_connection_returns_to_the_pool(app):
+    with dbmod.db_session(app.state.settings) as db:
+        db.execute("INSERT INTO branches (name) VALUES ('Ghost')")  # never committed
+    assert db_count(app, "branches", "name = 'Ghost'") == 0
+
+
+def test_sqlite_dialect_is_translated():
+    sql, wants = dbmod.translate("INSERT INTO t (a, b) VALUES (?, 'x?%')")
+    assert sql == "INSERT INTO t (a, b) VALUES (%s, 'x?%%') RETURNING id" and wants
+    assert dbmod.translate("SELECT 1 WHERE n LIKE ? COLLATE NOCASE AND d > datetime('now')")[0] ==         "SELECT 1 WHERE n ILIKE %s AND d > cc_now()"
+    assert dbmod.translate("INSERT INTO captcha_challenges (id) VALUES (?)")[1] is False
 
 
 def test_models_database_is_a_thin_shim():

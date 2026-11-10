@@ -8,7 +8,7 @@ _COMBO_SELECT = """
            y.id AS year_id, y.name AS year_name, y.sort_order AS year_order,
            d.id AS department_id, d.name AS department_name,
            b.id AS branch_id, b.name AS branch_name,
-           (s.is_active AND y.is_active AND d.is_active AND b.is_active) AS chain_active
+           (CASE WHEN s.is_active = 1 AND y.is_active = 1 AND d.is_active = 1 AND b.is_active = 1 THEN 1 ELSE 0 END) AS chain_active
     FROM sections s
     JOIN academic_years y ON y.id = s.academic_year_id
     JOIN departments d ON d.id = y.department_id
@@ -21,7 +21,7 @@ _CHAIN_ACTIVE_JOINS = """
     JOIN departments d ON d.id = y.department_id
     JOIN branches b ON b.id = d.branch_id
 """
-_CHAIN_ACTIVE_WHERE = "s.is_active AND y.is_active AND d.is_active AND b.is_active"
+_CHAIN_ACTIVE_WHERE = "s.is_active = 1 AND y.is_active = 1 AND d.is_active = 1 AND b.is_active = 1"
 
 
 # ---------- hierarchy ----------

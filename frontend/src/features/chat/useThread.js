@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApiError, errorMessage } from "@/lib/api";
 import { queryKeys } from "@/lib/queryClient";
+import { pollEvery } from "@/lib/polling";
 import { usePollDelay } from "./time";
 
 const TYPING_EVERY_MS = 3000;
@@ -33,7 +34,7 @@ function quoteOf(m) {
 export function useThread(adapter, id) {
   const qc = useQueryClient();
   const key = adapter.threadKey(id);
-  const delay = usePollDelay(2500, 12000);
+  const delay = usePollDelay(2500, false);
   const [pending, setPending] = useState([]);
   const lastTyping = useRef(0);
 
@@ -45,8 +46,8 @@ export function useThread(adapter, id) {
       return merge(prev, res);
     },
     // a closed / unknown conversation (4xx) is final: stop polling it
-    refetchInterval: (q) => (q.state.error instanceof ApiError && q.state.error.status >= 400 && q.state.error.status < 500 ? false : delay),
-    refetchIntervalInBackground: true,
+    refetchInterval: (q) => (q.state.error instanceof ApiError && q.state.error.status >= 400 && q.state.error.status < 500 ? false : pollEvery(delay, q)),
+    refetchOnWindowFocus: true, // polling pauses while the tab is hidden
     staleTime: 0,
   });
 

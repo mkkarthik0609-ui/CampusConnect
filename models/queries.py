@@ -23,16 +23,28 @@ def get_user_by_email(email):
 
 
 def update_user_password(user_id, password_hash):
+    """Sets a new password and bumps ``session_version`` so every existing session is rejected."""
     db = get_db()
     db.execute(
-        "UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
+        "UPDATE users SET password_hash = ?, session_version = session_version + 1, "
+        "updated_at = datetime('now') WHERE id = ?",
         (password_hash, user_id),
     )
     db.commit()
 
 
+def upgrade_password_hash(user_id, password_hash):
+    """Re-hash with current parameters after a successful login (same password: sessions stay valid)."""
+    db = get_db()
+    db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+    db.commit()
+
+
 def update_user_profile_picture(user_id, path):
     db = get_db()
+    old = db.execute("SELECT profile_picture_path FROM users WHERE id = ?", (user_id,)).fetchone()
+    if old and old[0] and old[0] != path:
+        db.execute("DELETE FROM file_blobs WHERE path = ?", (old[0],))  # the replaced picture, same transaction
     db.execute(
         "UPDATE users SET profile_picture_path = ?, updated_at = datetime('now') WHERE id = ?",
         (path, user_id),
@@ -153,7 +165,7 @@ def get_faculty_with_user(faculty_id):
 
 def get_faculty_by_professional_email(email):
     return get_db().execute(
-        "SELECT * FROM faculty WHERE professional_email = ? COLLATE NOCASE", (email,)
+        "SELECT * FROM faculty WHERE professional_email = ?", (email,)
     ).fetchone()
 
 
@@ -356,7 +368,7 @@ def list_admin_conversations(viewer_user_id, only_user_id=None):
                 SELECT m2.id FROM admin_messages m2
                 WHERE (m2.sender_user_id = u.id OR m2.recipient_user_id = u.id) AND {visible_sql("m2")}
                 ORDER BY m2.created_at DESC, m2.id DESC LIMIT 1)
-            WHERE (:only IS NULL OR u.id = :only)
+            WHERE (CAST(:only AS INTEGER) IS NULL OR u.id = :only)
             ORDER BY (lm.id IS NULL), lm.created_at DESC, u.full_name""",
         {"v": viewer_user_id, "only": only_user_id},
     ).fetchall()
@@ -402,13 +414,13 @@ def get_user_by_identifier(identifier):
         return get_user_by_email(identifier.lower())
     db = get_db()
     row = db.execute(
-        "SELECT u.* FROM users u JOIN faculty f ON f.user_id = u.id WHERE f.faculty_code = ? COLLATE NOCASE",
+        "SELECT u.* FROM users u JOIN faculty f ON f.user_id = u.id WHERE f.faculty_code = ?",
         (identifier,),
     ).fetchone()
     if row:
         return row
     return db.execute(
-        "SELECT u.* FROM users u JOIN students s ON s.user_id = u.id WHERE s.usn = ? COLLATE NOCASE",
+        "SELECT u.* FROM users u JOIN students s ON s.user_id = u.id WHERE s.usn = ?",
         (identifier,),
     ).fetchone()
 
@@ -573,7 +585,7 @@ CHAT_ACCESSIBLE_SQL = """(
             JOIN departments ad ON ad.id = ay.department_id
             JOIN branches ab ON ab.id = ad.branch_id
             WHERE ast.id = c.student_id AND afa.faculty_id = c.faculty_id
-              AND asec.is_active AND ay.is_active AND ad.is_active AND ab.is_active)
+              AND asec.is_active = 1 AND ay.is_active = 1 AND ad.is_active = 1 AND ab.is_active = 1)
     OR EXISTS (SELECT 1 FROM supporting_relationships asr
             JOIN students ast2 ON ast2.id = asr.student_id
             JOIN users asu2 ON asu2.id = ast2.user_id AND asu2.is_active = 1

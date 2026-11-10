@@ -73,7 +73,7 @@ def csrf_app(tmp_path):
 
 def make_user(app, role, email, password=GOOD_PASSWORD, name="Test User", **extra):
     with db_session(app.state.settings):
-        uid = queries.create_user(role, email, auth_service.generate_password_hash(password), name)
+        uid = queries.create_user(role, email, auth_service._hash(password), name)
         ids = {"user_id": uid}
         if role == "STUDENT":
             ids["student_id"] = queries.create_student(
@@ -237,8 +237,8 @@ def test_success_clears_identifier_counter_and_records_last_login(app, client):
 def test_login_takes_constant_hash_work_for_unknown_user(app, client, monkeypatch):
     """Unknown identifiers still run one password-hash verification (timing equalisation)."""
     calls = []
-    real = auth_service.check_password_hash
-    monkeypatch.setattr(auth_service, "check_password_hash", lambda h, p: calls.append(h) or real(h, p))
+    real = auth_service.verify_password
+    monkeypatch.setattr(auth_service, "verify_password", lambda h, p: calls.append(h) or real(h, p))
     make_user(app, "FACULTY", "f@x.edu")
     login(client, "ghost@x.edu", "WrongPass1")
     login(client, "f@x.edu", "WrongPass1")
@@ -484,9 +484,8 @@ def _chat_with_attachment(app):
     faculty = make_user(app, "FACULTY", "fac@x.edu")
     make_user(app, "ADMIN", "admin@x.edu")
     name = f"{uuid.uuid4().hex}.pdf"
-    os.makedirs(app.state.settings.chat_upload_dir, exist_ok=True)
-    with open(os.path.join(app.state.settings.chat_upload_dir, name), "wb") as f:
-        f.write(b"%PDF-1.4 secret")
+    from tests.conftest import REAL_PDF, put_blob
+    put_blob(app, f"chat/{name}", REAL_PDF)
     with db_session(app.state.settings):
         rel = queries.create_supporting_request(student["student_id"], faculty["faculty_id"], "STUDENT")
         queries.respond_supporting_relationship(rel, "ACCEPTED")
@@ -544,9 +543,8 @@ def test_upload_path_traversal_and_unknown_files_rejected(app):
 def test_profile_picture_visible_to_any_logged_in_user(app):
     make_user(app, "STUDENT", "stu@x.edu")
     name = f"{uuid.uuid4().hex}.png"
-    os.makedirs(app.state.settings.profile_student_dir, exist_ok=True)
-    with open(os.path.join(app.state.settings.profile_student_dir, name), "wb") as f:
-        f.write(b"\x89PNG\r\n\x1a\nxxxx")
+    from tests.conftest import REAL_PNG, put_blob
+    put_blob(app, f"profile/students/{name}", REAL_PNG)
     c = TestClient(app)
     assert c.get(f"/uploads/profile/students/{name}").status_code == 401
     login(c, "stu@x.edu", GOOD_PASSWORD)
@@ -559,9 +557,8 @@ def test_profile_picture_visible_to_any_logged_in_user(app):
 
 def test_non_image_in_profile_folder_is_attachment(app):
     make_user(app, "STUDENT", "stu@x.edu")
-    os.makedirs(app.state.settings.profile_student_dir, exist_ok=True)
-    with open(os.path.join(app.state.settings.profile_student_dir, "x.html"), "wb") as f:
-        f.write(b"<script>alert(1)</script>")
+    from tests.conftest import put_blob
+    put_blob(app, "profile/students/x.html", b"<script>alert(1)</script>")
     c = TestClient(app)
     login(c, "stu@x.edu", GOOD_PASSWORD)
     resp = c.get("/uploads/profile/students/x.html")
@@ -585,18 +582,29 @@ class _Upload:
 
 def test_file_service_validates_magic_bytes_size_and_names(app):
     from services import file_service
-    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    from services import storage
+    from tests.conftest import REAL_DOCX, REAL_PDF, REAL_PNG
+    png = REAL_PNG
     with db_session(app.state.settings):
         rel = file_service.save_profile_picture(_Upload("me.PNG", png), "STUDENT")
         assert rel.startswith("profile/students/") and rel.endswith(".png") and "me" not in rel
-        assert open(os.path.join(app.state.settings.upload_root, rel), "rb").read() == png
+        assert storage.get(rel) == (png, "image/png")
+        # right magic bytes but not a decodable image / a real pdf / a docx with word/ parts: refused
+        for fake in (_Upload("trunc.png", b"\x89PNG\r\n\x1a\n" + b"0" * 32), _Upload("p.jpg", b"\xff\xd8\xff" + b"0" * 32)):
+            with pytest.raises(file_service.FileValidationError):
+                file_service.save_profile_picture(fake, "FACULTY")
+        with pytest.raises(file_service.FileValidationError):
+            file_service.save_chat_attachment(_Upload("x.pdf", b"%PDF-1.4 no trailer"))
+        with pytest.raises(file_service.FileValidationError):
+            file_service.save_chat_attachment(_Upload("x.docx", b"PK\x03\x04 not really a zip"))
+        file_service.save_chat_attachment(_Upload("ok.docx", REAL_DOCX))
         for bad in (_Upload("evil.png", b"MZ\x90\x00" + b"0" * 32), _Upload("a.exe", png),
                     _Upload("e.png", b""), _Upload("big.png", png + b"0" * (3 * 1024 * 1024))):
             with pytest.raises(file_service.FileValidationError):
                 file_service.save_profile_picture(bad, "FACULTY")
         with pytest.raises(file_service.FileValidationError):
             file_service.save_chat_attachment(_Upload("x.pdf", b"not a pdf"))
-        rel, ext, original = file_service.save_chat_attachment(_Upload("../n o.pdf", b"%PDF-1.4 x"))
+        rel, ext, original = file_service.save_chat_attachment(_Upload("../n o.pdf", REAL_PDF))
         assert rel.startswith("chat/") and ext == "pdf" and original == "n_o.pdf"
 
 
@@ -976,12 +984,14 @@ def test_admin_bootstrap_is_idempotent_and_never_overwrites(app, monkeypatch):
     monkeypatch.setenv("ADMIN_PASSWORD", "Sample@1234")
     with db_session(app.state.settings):
         assert auth_service.bootstrap_admin_from_env() == "created"
+        assert "ADMIN_PASSWORD" not in os.environ  # plaintext secret dropped from the running process
+        assert queries.get_user_by_email(ADMIN_EMAIL)["password_hash"].startswith("$argon2id$")
         first = queries.get_user_by_email(ADMIN_EMAIL)
         assert first["role"] == "ADMIN"
         monkeypatch.setenv("ADMIN_PASSWORD", "Different@1234")
         assert auth_service.bootstrap_admin_from_env() == "exists"
         assert queries.get_user_by_email(ADMIN_EMAIL)["password_hash"] == first["password_hash"]
-    monkeypatch.delenv("ADMIN_PASSWORD")
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
     with db_session(app.state.settings):
         assert auth_service.bootstrap_admin_from_env() == "skipped"
 
@@ -1014,6 +1024,7 @@ def test_create_admin_cli(app, monkeypatch, capsys):
     monkeypatch.setenv("ADMIN_EMAIL", ADMIN_EMAIL)
     monkeypatch.setenv("ADMIN_PASSWORD", "Sample@1234")
     assert create_admin.main(["--from-env"], settings=settings) == 0
+    monkeypatch.setenv("ADMIN_PASSWORD", "Sample@1234")  # the first run dropped the secret from this process
     assert create_admin.main(["--from-env"], settings=settings) == 0  # idempotent
     out = capsys.readouterr().out
     assert "created" in out and "Nothing was changed" in out and "Karthik" not in out

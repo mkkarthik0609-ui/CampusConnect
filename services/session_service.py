@@ -39,6 +39,7 @@ def ensure_csrf_token(session):
 def apply_identity(session, user_row):
     """Copy the authoritative identity (role, name, student/faculty ids) from the DB row into the session."""
     session["user_id"] = user_row["id"]
+    session["sv"] = user_row["session_version"]  # a password change/reset bumps it and ends older sessions
     session["role"] = user_row["role"]
     session["full_name"] = user_row["full_name"]
     session.pop("student_id", None)
@@ -106,6 +107,10 @@ def resolve_session_user(session, absolute_seconds, idle_minutes):
 
     user = queries.get_user_by_id(user_id)
     if not user or not user["is_active"]:
+        session.clear()
+        return None, EXPIRED_INACTIVE
+
+    if session.get("sv", 0) != user["session_version"]:
         session.clear()
         return None, EXPIRED_INACTIVE
 

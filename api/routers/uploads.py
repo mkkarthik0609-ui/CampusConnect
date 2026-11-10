@@ -6,15 +6,15 @@
 """
 import os
 import posixpath
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
 from api.deps import CurrentUser, get_current_user
 from api.errors import ApiError
-from api.settings import get_settings
 from models import security_queries
-from services import chat_service
+from services import chat_service, storage
 from services.chat_service import ChatAccessError
 
 router = APIRouter()
@@ -67,15 +67,15 @@ def uploaded_file(filename: str, user: CurrentUser = Depends(get_current_user)):
     else:
         raise ApiError(404, "not_found", "File not found.")
 
-    root = os.path.realpath(get_settings().upload_root)
-    full = os.path.realpath(os.path.join(root, *parts))
-    if not full.startswith(root + os.sep) or not os.path.isfile(full):
+    blob = storage.get(rel)
+    if blob is None:
         raise ApiError(404, "not_found", "File not found.")
-
+    data, content_type = blob
     ext = rel.rsplit(".", 1)[-1].lower() if "." in rel else ""
-    is_image = ext in _IMAGE_EXTENSIONS
     headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": cache}
-    if is_image:
-        return FileResponse(full, content_disposition_type="inline", headers=headers)
-    return FileResponse(full, filename=original_name or os.path.basename(full),
-                        content_disposition_type="attachment", headers=headers)
+    if ext in _IMAGE_EXTENSIONS:
+        headers["Content-Disposition"] = "inline"
+    else:
+        name = (original_name or os.path.basename(rel)).replace('"', "").replace("\r", "").replace("\n", "")
+        headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name)}"
+    return Response(content=data, media_type=content_type, headers=headers)

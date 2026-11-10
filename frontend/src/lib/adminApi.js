@@ -22,7 +22,7 @@ export const adminKeys = {
   chat: (id) => ["admin", "chats", String(id)],
   permissions: ["admin", "permission-requests"],
   admins: ["admin", "admins"],
-  passkeys: ["admin", "passkeys"],
+  adminInvitations: ["admin", "admin-invitations"],
   research: ["research", "results"],
 };
 
@@ -55,19 +55,14 @@ export const adminApi = {
   removeRegistration: (id) => api.post(`${A}/students/${id}/remove-registration`, {}),
   faculty: () => api.get(`${A}/faculty`),
   admins: () => api.get(`${A}/admins`),
-  /** { full_name, email } -> { admin, temporary_password } (the password is shown once) */
-  createAdmin: (body) => api.post(`${A}/admins`, body),
   setAdminActive: (id, active) => api.post(`${A}/admins/${id}/active`, { active }),
-  /** -> { temporary_password } */
-  resetAdminPassword: (id) => api.post(`${A}/admins/${id}/reset-password`, {}),
-  revokeAdminPasskeys: (id) => api.delete(`${A}/admins/${id}/passkeys`),
 
-  // ---- my passkeys (WebAuthn) ----
-  passkeys: () => api.get(`${A}/passkeys`),
-  /** -> { options } */
-  passkeyOptions: () => api.post(`${A}/passkeys/options`, {}),
-  addPasskey: (credential, label) => api.post(`${A}/passkeys/verify`, { credential, label }),
-  removePasskey: (id) => api.delete(`${A}/passkeys/${id}`),
+  // ---- admin invitations (primary admin only) ----
+  adminInvitations: () => api.get(`${A}/admin-invitations`),
+  /** { email, full_name? } -> { message, invitation, email_delivery, invite_link } (invite_link only when the e-mail was NOT sent) */
+  inviteAdmin: (body) => api.post(`${A}/admin-invitations`, body),
+  resendAdminInvitation: (id) => api.post(`${A}/admin-invitations/${id}/resend`, {}),
+  revokeAdminInvitation: (id) => api.delete(`${A}/admin-invitations/${id}`),
 
   // ---- oversight ----
   meetings: (status) => api.get(`${A}/meetings`, { params: { status } }),

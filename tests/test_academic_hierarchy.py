@@ -2,7 +2,6 @@
 endpoints, student registration, 'students cannot change class', admin remove-registration and legacy-data
 migration."""
 import json
-import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
@@ -68,7 +67,7 @@ def test_seed_is_idempotent_and_skipped_when_any_branch_exists(app):
 
 def test_seed_not_rerun_after_admin_deactivates_everything(tmp_path):
     """Once a branch exists the admin owns the structure; a restart must not resurrect defaults."""
-    cfg = make_settings(tmp_path, database_path=str(tmp_path / "x.db"), upload_root=str(tmp_path / "up"))
+    cfg = make_settings(tmp_path)
     app1 = create_app(cfg)
     with app1.app_context():
         svc.set_active("branch", aq.get_branch_by_name("CSE")["id"], False)
@@ -954,36 +953,6 @@ def test_unmapped_legacy_student_is_flagged_with_legacy_text(app, admin_client):
 # legacy (pre-hierarchy) database migration
 # ---------------------------------------------------------------------------
 
-LEGACY_SCHEMA = """
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    role TEXT NOT NULL CHECK (role IN ('STUDENT', 'FACULTY', 'ADMIN')),
-    email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, full_name TEXT NOT NULL,
-    profile_picture_path TEXT, is_active INTEGER NOT NULL DEFAULT 1,
-    theme_preference TEXT NOT NULL DEFAULT 'light',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE faculty (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-    faculty_code TEXT NOT NULL UNIQUE, department TEXT NOT NULL, professional_email TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE students (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-    usn TEXT NOT NULL UNIQUE, branch TEXT NOT NULL, department TEXT NOT NULL, year TEXT NOT NULL,
-    section TEXT NOT NULL, phone TEXT NOT NULL, personal_email TEXT NOT NULL, college_email TEXT NOT NULL UNIQUE,
-    class_faculty_id INTEGER REFERENCES faculty(id) ON DELETE SET NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE faculty_classes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    faculty_id INTEGER NOT NULL REFERENCES faculty(id) ON DELETE CASCADE,
-    branch TEXT NOT NULL, department TEXT NOT NULL, year TEXT NOT NULL, section TEXT NOT NULL
-);
-"""
-
 LEGACY_STUDENTS = [
     # (usn, branch, department, year, section, expected "(dept, year, sec)" or None when unmatched)
     ("L1", "CSE", "AIML", "3rd Year", "A", ("AIML", "3rd Year", "A")),
@@ -1006,55 +975,47 @@ LEGACY_FACULTY_CLASSES = [
 ]
 
 
-def _build_legacy_db(path):
-    con = sqlite3.connect(path)
-    con.executescript(LEGACY_SCHEMA)
-    for code in ("LF1", "LF2"):
-        cur = con.execute("INSERT INTO users (role, email, password_hash, full_name) VALUES ('FACULTY', ?, 'x', ?)",
-                          (f"{code.lower()}@college.edu", f"Legacy {code}"))
-        con.execute("INSERT INTO faculty (user_id, faculty_code, department, professional_email) VALUES (?, ?, 'CSE', ?)",
-                    (cur.lastrowid, code, f"{code.lower()}@college.edu"))
-    for usn, branch, dept, year, sec, _ in LEGACY_STUDENTS:
-        cur = con.execute("INSERT INTO users (role, email, password_hash, full_name) VALUES ('STUDENT', ?, 'x', ?)",
-                          (f"{usn.lower()}@college.edu", f"Legacy {usn}"))
-        con.execute(
-            """INSERT INTO students (user_id, usn, branch, department, year, section, phone, personal_email, college_email)
-               VALUES (?, ?, ?, ?, ?, ?, '9999999999', 'p@example.com', ?)""",
-            (cur.lastrowid, usn, branch, dept, year, sec, f"{usn.lower()}@college.edu"))
-    for code, branch, dept, year, sec, _ in LEGACY_FACULTY_CLASSES:
-        fid = con.execute("SELECT id FROM faculty WHERE faculty_code = ?", (code,)).fetchone()[0]
-        con.execute("INSERT INTO faculty_classes (faculty_id, branch, department, year, section) VALUES (?, ?, ?, ?, ?)",
-                    (fid, branch, dept, year, sec))
-    con.commit()
-    con.close()
+def _build_legacy_db(cfg):
+    """Rows shaped like the pre-hierarchy app wrote them: students carry only free-text class columns
+    (section_id NULL), faculty carry faculty_classes rows."""
+    from api.db import db_session
+    with db_session(cfg) as con:
+        for code in ("LF1", "LF2"):
+            cur = con.execute("INSERT INTO users (role, email, password_hash, full_name) VALUES ('FACULTY', ?, 'x', ?)",
+                              (f"{code.lower()}@college.edu", f"Legacy {code}"))
+            con.execute("INSERT INTO faculty (user_id, faculty_code, department, professional_email) VALUES (?, ?, 'CSE', ?)",
+                        (cur.lastrowid, code, f"{code.lower()}@college.edu"))
+        for usn, branch, dept, year, sec, _ in LEGACY_STUDENTS:
+            cur = con.execute("INSERT INTO users (role, email, password_hash, full_name) VALUES ('STUDENT', ?, 'x', ?)",
+                              (f"{usn.lower()}@college.edu", f"Legacy {usn}"))
+            con.execute(
+                """INSERT INTO students (user_id, usn, branch, department, year, section, phone, personal_email, college_email)
+                   VALUES (?, ?, ?, ?, ?, ?, '9999999999', 'p@example.com', ?)""",
+                (cur.lastrowid, usn, branch, dept, year, sec, f"{usn.lower()}@college.edu"))
+        for code, branch, dept, year, sec, _ in LEGACY_FACULTY_CLASSES:
+            fid = con.execute("SELECT id FROM faculty WHERE faculty_code = ?", (code,)).fetchone()[0]
+            con.execute("INSERT INTO faculty_classes (faculty_id, branch, department, year, section) VALUES (?, ?, ?, ?, ?)",
+                        (fid, branch, dept, year, sec))
+        con.commit()
 
 
-def _columns(path, table):
-    con = sqlite3.connect(path)
-    try:
-        return {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
-    finally:
-        con.close()
-
-
-def _legacy_settings(tmp_path, path):
-    return make_settings(tmp_path, database_path=str(path), upload_root=str(tmp_path / "up"))
+def _legacy_settings(tmp_path, cfg):
+    return cfg
 
 
 @pytest.fixture
 def legacy_db(tmp_path):
-    path = tmp_path / "legacy.db"
-    _build_legacy_db(str(path))
-    assert "section_id" not in _columns(str(path), "students")
-    return tmp_path, path
+    cfg = make_settings(tmp_path)
+    from api import db as dbmod
+    dbmod.run_migrations(cfg)
+    _build_legacy_db(cfg)
+    return tmp_path, cfg
 
 
 def test_legacy_migration_adds_columns_seeds_structure_and_backfills(legacy_db):
     tmp_path, path = legacy_db
     app = create_app(_legacy_settings(tmp_path, path))
 
-    assert "section_id" in _columns(str(path), "students")
-    assert "last_login_at" in _columns(str(path), "users")
     with app.app_context():
         assert len(aq.list_combos()) == 72  # default structure seeded on the legacy database
 
@@ -1159,10 +1120,7 @@ def test_legacy_database_is_usable_through_the_admin_api(legacy_db):
     assert stats["faculty_count"] == 2
 
 
-def test_migrate_on_fresh_db_is_noop_and_columns_present(app):
+def test_migrations_are_idempotent_and_versioned(app):
     from api import db as dbmod
-    with app.app_context() as db:
-        dbmod._migrate(db)
-        dbmod._migrate(db)  # idempotent
-    assert {"section_id"} <= _columns(app.state.settings.database_path, "students")
-    assert {"last_login_at"} <= _columns(app.state.settings.database_path, "users")
+    assert dbmod.run_migrations(app.state.settings) == []  # already applied by create_app
+    assert dbmod.schema_version(app.state.settings) >= 2

@@ -71,8 +71,14 @@ class Settings:
     testing: bool = False  # tests: no scheduler, no admin bootstrap
     secret_key: str = ""
 
-    database_path: str = os.path.join(BASE_DIR, "database.db")
-    upload_root: str = os.path.join(BASE_DIR, "uploads")
+    # Runtime URL: Neon's POOLED (PgBouncer) endpoint. Migrations/maintenance use the DIRECT url.
+    database_url: str = ""
+    database_url_direct: str = ""
+    db_pool_min: int = 0
+    db_pool_max: int = 5          # Render Free is 512 MB; Neon pooler multiplexes the rest
+    db_pool_timeout: float = 15.0  # seconds to wait for a free pooled connection
+    db_connect_timeout: int = 15   # seconds; covers a Neon compute waking from scale-to-zero
+    db_connect_retries: int = 4
     frontend_dist: str = os.path.join(BASE_DIR, "frontend", "dist")
 
     max_request_bytes: int = 10 * 1024 * 1024  # 10 MB hard cap per request
@@ -91,7 +97,7 @@ class Settings:
     # ---- login throttling ----
     login_window_minutes: int = 15
     login_max_failures_per_identifier: int = 5
-    login_max_failures_per_ip: int = 20
+    login_max_failures_per_ip: int = 150  # hard block only for obvious floods; campus NAT shares one IP
 
     # ---- sessions / CSRF ----
     session_cookie_name: str = "cc_session"
@@ -112,10 +118,12 @@ class Settings:
     seed_extra_branches: bool = True
     # The owner account: always an active admin; nobody can deactivate it (PRIMARY_ADMIN_EMAIL).
     primary_admin_email: str = "mkkarthik0609@gmail.com"
-    # Browser origins allowed to register/use passkeys (WEBAUTHN_ALLOWED_ORIGINS, comma separated).
-    webauthn_allowed_origins: tuple = (
-        "https://campus-connect-network.vercel.app", "http://localhost:5173", "http://localhost:8000",
-    )
+    # Admin invitations: public frontend origin used to build invitation links, and e-mail delivery
+    # (Resend HTTP API; no key configured => invitations are created but NOT delivered, and the API says so).
+    public_app_url: str = "https://campus-connect-network.vercel.app"
+    invite_ttl_hours: int = 72
+    resend_api_key: str = ""
+    mail_from: str = ""
 
     # ------------------------------------------------------------------ derived
     @property
@@ -125,18 +133,6 @@ class Settings:
     @property
     def cookie_secure(self) -> bool:
         return self.is_production if self.session_cookie_secure is None else bool(self.session_cookie_secure)
-
-    @property
-    def profile_student_dir(self) -> str:
-        return os.path.join(self.upload_root, "profile", "students")
-
-    @property
-    def profile_faculty_dir(self) -> str:
-        return os.path.join(self.upload_root, "profile", "faculty")
-
-    @property
-    def chat_upload_dir(self) -> str:
-        return os.path.join(self.upload_root, "chat")
 
     @property
     def docs_enabled(self) -> bool:
@@ -162,8 +158,9 @@ class Settings:
             environment=environment,
             debug=debug and environment != "production",
             secret_key=secret,
-            database_path=os.environ.get("DATABASE_PATH") or cls.database_path,
-            upload_root=os.environ.get("UPLOAD_ROOT") or cls.upload_root,
+            database_url=(os.environ.get("DATABASE_URL_POOLED") or os.environ.get("DATABASE_URL") or "").strip(),
+            database_url_direct=(os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_URL_POOLED") or "").strip(),
+            db_pool_max=max(1, _env_int("DB_POOL_MAX", cls.db_pool_max)),
             frontend_dist=os.environ.get("FRONTEND_DIST") or cls.frontend_dist,
             captcha_max_per_ip_per_hour=_env_int("CAPTCHA_MAX_PER_IP_PER_HOUR", cls.captcha_max_per_ip_per_hour),
             login_captcha_after_failures=_env_int("LOGIN_CAPTCHA_AFTER_FAILURES", cls.login_captcha_after_failures),
@@ -178,9 +175,10 @@ class Settings:
             bootstrap_admin=_env_bool("BOOTSTRAP_ADMIN", False),
             seed_extra_branches=_env_bool("SEED_EXTRA_BRANCHES", True),
             primary_admin_email=(os.environ.get("PRIMARY_ADMIN_EMAIL") or cls.primary_admin_email).strip().lower(),
-            webauthn_allowed_origins=tuple(
-                o.strip().rstrip("/") for o in (os.environ.get("WEBAUTHN_ALLOWED_ORIGINS") or "").split(",") if o.strip()
-            ) or cls.webauthn_allowed_origins,
+            public_app_url=(os.environ.get("PUBLIC_APP_URL") or cls.public_app_url).strip().rstrip("/"),
+            invite_ttl_hours=max(1, _env_int("INVITE_TTL_HOURS", cls.invite_ttl_hours)),
+            resend_api_key=(os.environ.get("RESEND_API_KEY") or "").strip(),
+            mail_from=(os.environ.get("MAIL_FROM") or "").strip(),
         )
         values.update(overrides)
         return cls(**values)

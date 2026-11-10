@@ -100,9 +100,9 @@ const permissionRequests = [
 ];
 const stuPerm = (id, status) => ({ id, request_type: "STUDENT_PROFILE_CHANGE", status, requested_changes: { phone: "9876500000" }, reason: "Changed SIM", created_at: ts(30), reviewed_at: status === "PENDING" ? null : ts(20), requester_name: "Ananya Rao", student: STU[0] });
 const ADMINS = [
-  { id: 3, full_name: "Campus Admin", email: "admin@college.edu", profile_picture_url: null, is_active: true, is_you: true, is_primary: true, passkey_count: 1, created_at: ts(2000), last_login_at: ts(1) },
-  { id: 11, full_name: "Second Admin", email: "second@college.edu", profile_picture_url: null, is_active: true, is_you: false, is_primary: false, passkey_count: 0, created_at: ts(900), last_login_at: null },
-  { id: 12, full_name: "Retired Admin", email: "retired@college.edu", profile_picture_url: null, is_active: false, is_you: false, is_primary: false, passkey_count: 0, created_at: ts(1500), last_login_at: ts(600) },
+  { id: 3, full_name: "Campus Admin", email: "admin@college.edu", profile_picture_url: null, is_active: true, is_you: true, is_primary: true, created_at: ts(2000), last_login_at: ts(1) },
+  { id: 11, full_name: "Second Admin", email: "second@college.edu", profile_picture_url: null, is_active: true, is_you: false, is_primary: false, created_at: ts(900), last_login_at: null },
+  { id: 12, full_name: "Retired Admin", email: "retired@college.edu", profile_picture_url: null, is_active: false, is_you: false, is_primary: false, created_at: ts(1500), last_login_at: ts(600) },
 ];
 
 const cell = (mean, sd, n = 30) => ({ mean, sd, ci95: sd * 0.37, n });
@@ -210,8 +210,8 @@ export function handleDataMock({ method, path, url, body, user, json, err }) {
     if (path === "/api/admin/meetings") { const rows = meetingRows(MEETINGS); return json(200, { items: rows, total: rows.length }); }
     if (path === "/api/admin/permission-requests") return json(200, { items: permissionRequests, total: 3, pending: 2 });
     if (path === "/api/admin/admins") return json(200, { items: ADMINS, total: ADMINS.length });
-    if (path === "/api/admin/passkeys") return json(200, { items: [{ id: 1, label: "Work laptop", transports: ["internal"], created_at: ts(500), last_used_at: ts(2) }], total: 1 });
-    if (method !== "GET") return json(200, { ok: true, message: "Done.", temporary_password: "Temp-4821-xk", admin: ADMINS[1] });
+    if (path === "/api/admin/admin-invitations") return json(200, { items: [], total: 0 });
+    if (method !== "GET") return json(200, { ok: true, message: "Done." });
   }
   if (path === "/api/research/results" && role === "ADMIN") return json(200, research);
   return NODATA;

@@ -7,10 +7,10 @@ import json
 import re
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import Field
 
-from api.deps import ApiModel, CurrentUser, Stripped, items, ok, require_role, service_errors
+from api.deps import ApiModel, CurrentUser, Stripped, client_ip, items, ok, require_role, service_errors
 from api.errors import ApiError
 from api.settings import get_settings
 from api.schemas import class_object, profile_picture_url
@@ -19,7 +19,7 @@ from models import academic_queries as aq
 from models import admin_queries
 from models import queries
 from models import security_queries as sq
-from services import auth_service, file_service, permission_service
+from services import audit_service, auth_service, file_service, invitation_service, permission_service
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_role("ADMIN"))], tags=["admin"])
 
@@ -123,9 +123,9 @@ class DecisionIn(ApiModel):
     decision: Literal["approve", "reject"]
 
 
-class AdminCreateIn(ApiModel):
-    full_name: Stripped = Field(min_length=1, max_length=120)
+class AdminInviteIn(ApiModel):
     email: Stripped = Field(min_length=1, max_length=254)
+    full_name: Optional[Stripped] = Field(default=None, max_length=120)
 
 
 class ActiveIn(ApiModel):
@@ -360,7 +360,6 @@ def admin_item(row, current_user_id):
         "profile_picture_url": profile_picture_url(row["profile_picture_path"]),
         "is_active": bool(row["is_active"]), "is_you": row["id"] == current_user_id,
         "is_primary": get_settings().is_primary_admin(row["email"]),
-        "passkey_count": sq.count_passkeys(row["id"]),
         "created_at": row["created_at"], "last_login_at": row["last_login_at"],
     }
 
@@ -378,32 +377,53 @@ def list_admins(user: CurrentUser = Depends(require_role("ADMIN"))):
     return items(out, total=len(out))
 
 
-@router.post("/admins", status_code=201)
-def create_admin(body: AdminCreateIn, user: CurrentUser = Depends(primary_admin)):
-    """Primary admin only. The generated temporary password is returned ONCE."""
+def _invite_response(message, invitation, delivery, link):
+    """`delivery` is SENT / FAILED / NOT_CONFIGURED. The link is only present when the e-mail was NOT sent, so
+    the primary admin can pass it on by hand; it is shown once and never stored or logged."""
+    if delivery == "SENT":
+        detail = "Invitation e-mailed."
+    elif delivery == "NOT_CONFIGURED":
+        detail = ("E-mail delivery is not configured on the server (RESEND_API_KEY / MAIL_FROM), so nothing was "
+                  "sent. Share the one-time link below yourself.")
+    else:
+        detail = "The e-mail could not be delivered. Share the one-time link below yourself, or resend."
+    return ok(f"{message} {detail}", invitation=invitation, email_delivery=delivery, invite_link=link)
+
+
+@router.get("/admin-invitations")
+def list_admin_invitations(user: CurrentUser = Depends(primary_admin)):
+    out = invitation_service.list_invitations()
+    return items(out, total=len(out))
+
+
+@router.post("/admin-invitations", status_code=201)
+def invite_admin(body: AdminInviteIn, request: Request, user: CurrentUser = Depends(primary_admin)):
+    """Primary admin only: invite a future administrator by e-mail address."""
     with service_errors():
-        new_id, temporary_password = auth_service.create_admin_account(body.full_name, body.email)
-    return ok("Admin account created. Share the temporary password securely; it is shown only once.",
-              admin=admin_item(admin_queries.get_admin(new_id), user["id"]), temporary_password=temporary_password)
+        invitation, delivery, link = invitation_service.create_invitation(user, body.email, body.full_name)
+    return _invite_response("Invitation created.", invitation, delivery, link)
+
+
+@router.post("/admin-invitations/{invitation_id}/resend")
+def resend_admin_invitation(invitation_id: int, user: CurrentUser = Depends(primary_admin)):
+    with service_errors():
+        invitation, delivery, link = invitation_service.resend_invitation(user, invitation_id)
+    return _invite_response("Invitation renewed.", invitation, delivery, link)
+
+
+@router.delete("/admin-invitations/{invitation_id}")
+def revoke_admin_invitation(invitation_id: int, user: CurrentUser = Depends(primary_admin)):
+    with service_errors():
+        invitation_service.revoke_invitation(user, invitation_id)
+    return ok("Invitation revoked.")
 
 
 @router.post("/admins/{admin_id}/active")
 def set_admin_active(admin_id: int, body: ActiveIn, user: CurrentUser = Depends(primary_admin)):
     with service_errors():
         auth_service.set_admin_active(user["id"], admin_id, body.active)
+    audit_service.record(user, "admin.activate" if body.active else "admin.deactivate", admin_id)
     return ok("Admin reactivated." if body.active else "Admin deactivated.",
               admin=admin_item(admin_queries.get_admin(admin_id), user["id"]))
 
 
-@router.post("/admins/{admin_id}/reset-password")
-def reset_admin_password(admin_id: int, user: CurrentUser = Depends(primary_admin)):
-    with service_errors():
-        temporary_password = auth_service.reset_admin_password(admin_id)
-    return ok("Temporary password set. Share it securely; it is shown only once.", temporary_password=temporary_password)
-
-
-@router.delete("/admins/{admin_id}/passkeys")
-def revoke_admin_passkeys(admin_id: int, user: CurrentUser = Depends(primary_admin)):
-    with service_errors():
-        removed = auth_service.revoke_admin_passkeys(admin_id)
-    return ok("Passkeys revoked.", removed=removed)

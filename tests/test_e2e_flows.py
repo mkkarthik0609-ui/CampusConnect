@@ -814,12 +814,16 @@ def test_every_admin_page_loads_with_real_data(app, world):
 def test_admin_can_appoint_another_admin_who_has_full_access(app, campus):
     ac = login_client(app, campus["admin_email"])
     payload = {"full_name": "Second Admin", "email": "admin2@college.edu"}
-    assert api_post(ac, "/api/admin/admins", json={**payload, "email": "nope"}).status_code == 400
-    created = api_post(ac, "/api/admin/admins", json=payload)
+    assert api_post(ac, "/api/admin/admin-invitations", json={**payload, "email": "nope"}).status_code == 400
+    created = api_post(ac, "/api/admin/admin-invitations", json=payload)
     assert created.status_code == 201, created.text
-    assert api_post(ac, "/api/admin/admins", json=payload).status_code == 409
+    assert api_post(ac, "/api/admin/admin-invitations", json=payload).status_code == 409
+    token = created.json()["invite_link"].split("#t=", 1)[1]
+    done = api_post(TestClient(app), "/api/auth/admin-invite/accept", json={
+        "token": token, "full_name": "Second Admin", "password": "Chosen#Pass1word", "confirm_password": "Chosen#Pass1word"})
+    assert done.status_code == 201, done.text
     assert ac.get("/api/admin/admins").json()["total"] == 2
-    second = login_client(app, "admin2@college.edu", created.json()["temporary_password"])
+    second = login_client(app, "admin2@college.edu", "Chosen#Pass1word")
     assert second.get("/api/admin/dashboard").status_code == 200
 
 
@@ -898,7 +902,7 @@ def test_role_matrix_for_every_area(app, world):
     assert api_post(fc, "/api/meetings", json={"faculty_id": 1, "reason": "x"}).status_code == 403
     assert api_post(sc, "/api/faculty/classes/request", json={"section_id": world["sid"]}).status_code == 403
     assert api_post(sc, "/api/admin/assignments", json={"faculty_id": 1, "section_id": world["sid"]}).status_code == 403
-    assert api_post(fc, "/api/admin/admins", json={"full_name": "x", "email": "x@y.z"}).status_code == 403
+    assert api_post(fc, "/api/admin/admin-invitations", json={"full_name": "x", "email": "x@y.z"}).status_code == 403
     assert api_post(ac, "/api/meetings", json={"faculty_id": 1, "reason": "x"}).status_code == 403
     # unknown API paths are JSON 404s
     nf = sc.get("/api/does/not/exist")

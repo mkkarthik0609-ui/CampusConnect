@@ -1,8 +1,8 @@
-"""In-memory typing indicators and "last active" presence for the messaging screens.
+"""Typing indicators and "last active" presence for the messaging screens.
 
-shortcut: process-local dicts, which is right for the single-worker deployment this app runs as; switch to a
-shared store (Redis / a table) before running more than one worker. After a restart everybody is simply
-"unknown" until their next request.
+"Last active" is persisted (table ``presence``, throttled to one write per user per PERSIST_EVERY seconds, written
+after the request's own transaction so it never commits half-finished work), so it survives restarts and works
+with several instances. Typing indicators are 5-second signals and stay in process memory on purpose.
 """
 import time
 
@@ -10,7 +10,9 @@ TYPING_TTL = 5.0     # seconds a "typing..." signal stays alive without a refres
 ONLINE_WINDOW = 30.0  # a participant who fetched/polled within this many seconds counts as online
 
 _typing = {}   # (scope, conversation_id, user_id) -> expiry (monotonic seconds)
-_active = {}   # user_id -> unix seconds of the last request that touched a conversation
+_active = {}   # user_id -> unix seconds of the last request that touched a conversation (read-through cache)
+_persisted = {}  # user_id -> unix seconds of the last database write for that user
+PERSIST_EVERY = 20.0
 
 
 def _mono():
@@ -23,7 +25,15 @@ def _wall():
 
 def touch(user_id):
     """The user's client just fetched / polled / sent something."""
-    _active[user_id] = _wall()
+    now = _wall()
+    _active[user_id] = now
+    if now - _persisted.get(user_id, 0) >= PERSIST_EVERY:
+        from api import db as dbmod
+        if dbmod.defer_write(
+                "INSERT INTO presence (user_id, last_seen_epoch) VALUES (%s, %s) "
+                "ON CONFLICT (user_id) DO UPDATE SET last_seen_epoch = EXCLUDED.last_seen_epoch",
+                (user_id, int(now))):
+            _persisted[user_id] = now
 
 
 def set_typing(scope, conversation_id, user_id):
@@ -49,6 +59,11 @@ def is_typing(scope, conversation_id, user_id):
 def status(user_id):
     """``{"online": bool, "last_active_at": 'YYYY-MM-DD HH:MM:SS' (UTC) | None}``."""
     seen = _active.get(user_id)
+    if seen is None:  # after a restart (or on another instance): fall back to the persisted value
+        from api import db as dbmod
+        if dbmod.has_db_context():
+            row = dbmod.get_db().execute("SELECT last_seen_epoch FROM presence WHERE user_id = ?", (user_id,)).fetchone()
+            seen = float(row[0]) if row else None
     if seen is None:
         return {"online": False, "last_active_at": None}
     return {
@@ -61,3 +76,4 @@ def reset():
     """Forget everything (tests)."""
     _typing.clear()
     _active.clear()
+    _persisted.clear()

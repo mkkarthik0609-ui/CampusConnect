@@ -7,15 +7,16 @@ import { UserAvatar } from "@/components/app/UserAvatar";
 import { cn } from "@/lib/utils";
 import { Tick } from "./MessageBubble";
 import { listTime, usePollDelay } from "./time";
+import { pollEvery } from "@/lib/polling";
 
 /** Left pane: title, search box, All / Unread chips and the conversation rows. */
 export function ChatList({ adapter, selectedId, onSelect }) {
-  const delay = usePollDelay(5000, 15000);
+  const delay = usePollDelay(5000, false);
   const query = useQuery({
     queryKey: adapter.listKey,
     queryFn: adapter.fetchList,
-    refetchInterval: delay,
-    refetchIntervalInBackground: true,
+    refetchInterval: (q) => pollEvery(delay, q),
+    refetchOnWindowFocus: true, // polling pauses while the tab is hidden
     staleTime: 2000,
   });
   const [search, setSearch] = useState("");

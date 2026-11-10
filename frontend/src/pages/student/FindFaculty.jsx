@@ -19,6 +19,7 @@ import { errorMessage } from "@/lib/api";
 import { supportingApi } from "@/lib/endpoints";
 import { formatDate } from "@/lib/format";
 import { queryKeys } from "@/lib/queryClient";
+import { pollEvery } from "@/lib/polling";
 
 const panel = "overflow-hidden rounded-lg border border-line bg-card shadow-sm";
 
@@ -33,7 +34,7 @@ export default function FindFaculty() {
     placeholderData: keepPreviousData,
     staleTime: 5_000,
   });
-  const requests = useQuery({ queryKey: queryKeys.supporting, queryFn: () => supportingApi.list(), refetchInterval: 30_000 });
+  const requests = useQuery({ queryKey: queryKeys.supporting, queryFn: () => supportingApi.list(), refetchInterval: (q) => pollEvery(30_000, q) });
   const open = useOpenChat();
   const prompt = usePrompt();
   const qc = useQueryClient();

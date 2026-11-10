@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { fetchSession, setUnauthorizedHandler } from "@/lib/api";
 import { authApi } from "@/lib/endpoints";
 import { queryKeys } from "@/lib/queryClient";
+import { pollEvery } from "@/lib/polling";
 import { forgetStoredTheme } from "@/lib/themeStorage";
 
 const POLL_MS = 30_000;
@@ -30,10 +31,10 @@ export function AuthProvider({ children }) {
     queryKey: queryKeys.session,
     queryFn: fetchSession,
     staleTime: 10_000,
-    refetchInterval: (q) => (q.state.data?.authenticated ? POLL_MS : false),
+    refetchInterval: (q) => (q.state.data?.authenticated ? pollEvery(POLL_MS, q) : false),
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
-    retry: 1,
+    retry: false, // GETs already retry with backoff in lib/api.js
   });
 
   const data = query.data;

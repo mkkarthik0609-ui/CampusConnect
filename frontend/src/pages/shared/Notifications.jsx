@@ -10,6 +10,7 @@ import { Notice } from "@/components/app/Notice";
 import { useAuth } from "@/auth/AuthProvider";
 import { notificationsApi } from "@/lib/endpoints";
 import { queryKeys } from "@/lib/queryClient";
+import { pollEvery } from "@/lib/polling";
 import { errorMessage } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/format";
 import { notificationTarget } from "@/lib/notificationTarget";
@@ -19,7 +20,7 @@ import { cn } from "@/lib/utils";
 export default function Notifications() {
   const qc = useQueryClient();
   const { role } = useAuth();
-  const query = useQuery({ queryKey: queryKeys.notifications, queryFn: notificationsApi.list, refetchInterval: 30_000 });
+  const query = useQuery({ queryKey: queryKeys.notifications, queryFn: notificationsApi.list, refetchInterval: (q) => pollEvery(30_000, q) });
 
   const refreshCounts = () => {
     qc.invalidateQueries({ queryKey: queryKeys.notifications });

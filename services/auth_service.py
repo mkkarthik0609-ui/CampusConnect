@@ -2,7 +2,10 @@ import os
 import re
 import secrets
 
-from werkzeug.security import generate_password_hash, check_password_hash
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError
+from werkzeug.security import check_password_hash
+from api.db import get_db
 from api.settings import get_settings
 from models import queries
 from models import security_queries as sq
@@ -61,13 +64,33 @@ def validate_password_strength(password, disallow=(), field="password"):
     return password
 
 
+# Argon2id (OWASP minimum profile: 19 MiB, t=2, p=1) keeps a login affordable on Render Free's shared CPU.
+# Hashes written by the SQLite-era app (werkzeug scrypt/pbkdf2) still verify and are upgraded on next login.
+_hasher = PasswordHasher(time_cost=2, memory_cost=19456, parallelism=1)
+
+
+def _hash(password):
+    return _hasher.hash(password)
+
+
 def hash_password(password, disallow=(), field="password"):
     validate_password_strength(password, disallow, field)
-    return generate_password_hash(password)
+    return _hash(password)
 
 
 def verify_password(password_hash, password):
-    return check_password_hash(password_hash, password)
+    if not password_hash:
+        return False
+    if password_hash.startswith("$argon2"):
+        try:
+            return _hasher.verify(password_hash, password)
+        except (VerificationError, InvalidHashError):
+            return False
+    return check_password_hash(password_hash, password)  # legacy werkzeug hash
+
+
+def password_needs_rehash(password_hash):
+    return not password_hash.startswith("$argon2") or _hasher.check_needs_rehash(password_hash)
 
 
 def validate_email(email, field_name="Email", field=None):
@@ -98,6 +121,14 @@ def validate_phone(phone):
     return phone
 
 
+def _reserved_for_admin(email):
+    """The primary admin's address and any address with a live admin invitation can never be claimed by signup."""
+    if get_settings().is_primary_admin(email):
+        return True
+    return get_db().execute(
+        "SELECT 1 FROM admin_invitations WHERE email = ? AND status = 'PENDING'", (email,)).fetchone() is not None
+
+
 def register_student(data):
     """data: dict with full_name, usn, section_id (Admin-defined Branch/Dept/Year/Section), phone,
     personal_email, college_email, password. Returns created user id."""
@@ -109,7 +140,7 @@ def register_student(data):
     password_hash = hash_password(data.get("password"), disallow=(college_email, usn, personal_email))
 
     # The primary admin's address is reserved: public signup must never be able to take it first.
-    if queries.get_user_by_email(college_email) or get_settings().is_primary_admin(college_email):
+    if queries.get_user_by_email(college_email) or _reserved_for_admin(college_email):
         raise ConflictError("An account with this college email already exists.", "college_email")
     # Last, so a typed class is only created once everything else is valid.
     try:
@@ -117,16 +148,23 @@ def register_student(data):
     except AcademicError as e:
         raise ValidationError(str(e), "section_id")
 
-    user_id = queries.create_user("STUDENT", college_email, password_hash, full_name)
-    student_id = queries.create_student(
-        user_id, usn, combo["branch_name"], combo["department_name"], combo["year_name"],
-        combo["section_name"], phone, personal_email, college_email,
-    )
-    aq.set_student_section(
-        student_id, combo["section_id"], combo["branch_name"], combo["department_name"],
-        combo["year_name"], combo["section_name"],
-    )
+    with get_db().transaction():  # user + student + class link, all or nothing
+        user_id = queries.create_user("STUDENT", college_email, password_hash, full_name)
+        student_id = queries.create_student(
+            user_id, usn, combo["branch_name"], combo["department_name"], combo["year_name"],
+            combo["section_name"], phone, personal_email, college_email,
+        )
+        aq.set_student_section(
+            student_id, combo["section_id"], combo["branch_name"], combo["department_name"],
+            combo["year_name"], combo["section_name"],
+        )
     return user_id
+
+
+def _race_to_conflict(exc, message, field):
+    if exc.__class__.__name__ == "UniqueViolation":
+        return ConflictError(message, field)
+    return exc
 
 
 def normalize_subjects(subjects):
@@ -164,13 +202,14 @@ def register_faculty(data):
         raise ValidationError("At least one subject is required.", "subjects")
     if queries.get_faculty_code_exists(faculty_code):
         raise ConflictError("This Faculty ID is already registered.", "faculty_code")
-    if queries.get_user_by_email(professional_email) or get_settings().is_primary_admin(professional_email):
+    if queries.get_user_by_email(professional_email) or _reserved_for_admin(professional_email):
         raise ConflictError("An account with this professional email already exists.", "professional_email")
 
-    user_id = queries.create_user("FACULTY", professional_email, password_hash, full_name)
-    faculty_id = queries.create_faculty(user_id, faculty_code, department, professional_email)
-    for subject in subjects:
-        queries.add_faculty_subject(faculty_id, subject)
+    with get_db().transaction():  # user + faculty + subjects, all or nothing
+        user_id = queries.create_user("FACULTY", professional_email, password_hash, full_name)
+        faculty_id = queries.create_faculty(user_id, faculty_code, department, professional_email)
+        for subject in subjects:
+            queries.add_faculty_subject(faculty_id, subject)
     return user_id
 
 
@@ -182,7 +221,7 @@ def _dummy_hash():
     exist, so response time does not reveal which identifiers are registered."""
     global _DUMMY_HASH
     if _DUMMY_HASH is None:
-        _DUMMY_HASH = generate_password_hash("dummy-password-for-timing-equalisation")
+        _DUMMY_HASH = _hash("dummy-password-for-timing-equalisation")
     return _DUMMY_HASH
 
 
@@ -232,6 +271,8 @@ def authenticate(identifier, password, ip=None, role=None):
     sq.clear_failures_for_identifier(ident)
     sq.record_login_attempt(ident, ip, True)
     sq.touch_last_login(user["id"])
+    if password_needs_rehash(user["password_hash"]):
+        queries.upgrade_password_hash(user["id"], _hash(password))
     return user
 
 
@@ -270,7 +311,13 @@ def ensure_admin(full_name, email, password):
         return False
     full_name = validate_required(full_name, "Full name")
     password_hash = hash_password(password, disallow=(email,))
-    queries.create_user("ADMIN", email, password_hash, full_name)
+    try:
+        queries.create_user("ADMIN", email, password_hash, full_name)
+    except Exception as exc:  # noqa: BLE001 - another instance bootstrapped it a moment ago: same outcome
+        get_db().rollback()
+        if exc.__class__.__name__ == "UniqueViolation":
+            return False
+        raise
     return True
 
 
@@ -287,20 +334,15 @@ def bootstrap_admin_from_env():
         return "skipped"
     if not get_settings().is_primary_admin(email):
         raise ValidationError("ADMIN_EMAIL must be the PRIMARY_ADMIN_EMAIL address.", "email")
-    return "created" if ensure_admin(name, email, password) else "exists"
+    created = ensure_admin(name, email, password)
+    # The plaintext secret has done its job: drop it from this process' environment (it stays in the host's
+    # secret store, but nothing running can read it back, e.g. through a debug endpoint or a child process).
+    os.environ.pop("ADMIN_PASSWORD", None)
+    return "created" if created else "exists"
 
 
 # ---------------------------------------------------------------- admin account management
-# Every admin may manage every other admin; only the primary admin is protected.
-
-def generate_temp_password():
-    """A strong one-time password (16 chars, no look-alike characters) that satisfies the policy."""
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
-    while True:
-        password = "".join(secrets.choice(alphabet) for _ in range(16))
-        if re.search(r"[A-Z]", password) and re.search(r"[a-z]", password) and re.search(r"[0-9]", password):
-            return password
-
+# Only the primary admin appoints (invitations), deactivates and reactivates admins; the primary account itself is protected.
 
 def _managed_admin(admin_id):
     admin = queries.get_user_by_id(admin_id)
@@ -314,17 +356,6 @@ def _not_primary(admin):
         raise ValidationError("The primary administrator account is protected and cannot be changed this way.")
 
 
-def create_admin_account(full_name, email):
-    """Create an ADMIN with a generated temporary password. Returns (user_id, temporary_password); the
-    password is shown to the creator once and is never stored in clear text."""
-    full_name = validate_required(full_name, "Full name", "full_name")
-    email = validate_email(email, "Email", "email")
-    if queries.get_user_by_email(email):
-        raise ConflictError("An account with this email already exists.", "email")
-    temp = generate_temp_password()
-    return queries.create_user("ADMIN", email, hash_password(temp, disallow=(email,)), full_name), temp
-
-
 def set_admin_active(acting_admin_id, admin_id, active):
     admin = _managed_admin(admin_id)
     if not active:
@@ -332,19 +363,3 @@ def set_admin_active(acting_admin_id, admin_id, active):
         if admin["id"] == acting_admin_id:
             raise ValidationError("You cannot deactivate your own account.")
     sq.set_user_active(admin["id"], active)
-
-
-def reset_admin_password(admin_id):
-    """Replace an admin's password with a new temporary one (returned once) and lift any sign-in lockout."""
-    admin = _managed_admin(admin_id)
-    _not_primary(admin)
-    temp = generate_temp_password()
-    queries.update_user_password(admin["id"], hash_password(temp, disallow=(admin["email"],)))
-    sq.clear_failures_for_identifier(normalize_identifier(admin["email"]))
-    return temp
-
-
-def revoke_admin_passkeys(admin_id):
-    admin = _managed_admin(admin_id)
-    _not_primary(admin)
-    return sq.delete_passkeys_for_user(admin["id"])

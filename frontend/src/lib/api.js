@@ -68,7 +68,7 @@ export function setUnauthorizedHandler(fn) { unauthorizedHandler = fn; }
  */
 export function fetchSession() {
   if (!sessionInFlight) {
-    sessionInFlight = send("GET", "/api/auth/session", { cache: "no-store" })
+    sessionInFlight = sendWithRetry("GET", "/api/auth/session", { cache: "no-store" })
       .then((data) => {
         setCsrfToken(data?.csrf_token);
         return data;
@@ -165,6 +165,60 @@ async function send(method, path, { params, body, formData, signal, headers, cac
   return payload ?? {};
 }
 
+// ---------------------------------------------------------------------------------------------
+// Cold-start resilience (Render Free sleeps; the first request can take 30-60 s)
+// ---------------------------------------------------------------------------------------------
+const WAKE_AFTER_MS = 4000;
+const RETRY_DELAYS = [1500, 4000, 8000]; // GET only: up to 3 retries on network errors / 502 / 503 / 504
+const RETRYABLE = new Set([0, 502, 503, 504]);
+let served = false; // the server has answered at least once in this page load
+let waking = 0;
+const wakeListeners = new Set();
+
+function setWaking(delta) {
+  waking += delta;
+  wakeListeners.forEach((fn) => fn());
+}
+/** For useSyncExternalStore: true while a GET is retrying or the very first request is slow. */
+export const subscribeWaking = (fn) => { wakeListeners.add(fn); return () => wakeListeners.delete(fn); };
+export const isWaking = () => waking > 0;
+
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException("Aborted", "AbortError")); return; }
+    const onAbort = () => { clearTimeout(t); reject(new DOMException("Aborted", "AbortError")); };
+    const t = setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve(); }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** Idempotent GETs retry with backoff; every other method goes straight through. */
+async function sendWithRetry(method, path, opts = {}) {
+  if (method !== "GET") return send(method, path, opts);
+  let marked = false;
+  const mark = () => { if (!marked) { marked = true; setWaking(1); } };
+  const timer = served ? null : setTimeout(mark, WAKE_AFTER_MS);
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const data = await send(method, path, opts);
+        served = true;
+        return data;
+      } catch (err) {
+        if (err instanceof ApiError && err.status > 0) served = true;
+        const retryable = err instanceof ApiError && RETRYABLE.has(err.status) && err.code !== "bad_response"
+          && !(err.status === 0 && navigator.onLine === false);
+        if (!retryable || attempt >= RETRY_DELAYS.length) throw err;
+        mark();
+        await sleep(RETRY_DELAYS[attempt], opts.signal);
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+    if (marked) setWaking(-1);
+  }
+}
+
 /**
  * @param {string} method
  * @param {string} path
@@ -176,7 +230,7 @@ async function request(method, path, opts = {}) {
     try { await fetchSession(); } catch { /* the real request below reports the failure */ }
   }
   try {
-    return await send(method, path, opts);
+    return await sendWithRetry(method, path, opts);
   } catch (err) {
     if (err instanceof ApiError) {
       if (unsafe && err.status === 400 && err.code === "csrf_failed" && !opts._retried) {

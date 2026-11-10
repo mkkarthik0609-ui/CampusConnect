@@ -17,12 +17,13 @@ import { errorMessage } from "@/lib/api";
 import { studentApi, supportingApi } from "@/lib/endpoints";
 import { formatDate } from "@/lib/format";
 import { queryKeys } from "@/lib/queryClient";
+import { pollEvery } from "@/lib/polling";
 
 const panel = "overflow-hidden rounded-lg border border-line bg-card shadow-sm";
 
 /** /student/dashboard - who can help you, what is waiting on you, and your latest meeting requests. */
 export default function StudentDashboard() {
-  const query = useQuery({ queryKey: queryKeys.studentDashboard, queryFn: studentApi.dashboard, refetchInterval: 30_000 });
+  const query = useQuery({ queryKey: queryKeys.studentDashboard, queryFn: studentApi.dashboard, refetchInterval: (q) => pollEvery(30_000, q) });
   const d = query.data;
   const firstName = d?.student?.full_name?.split(/\s+/)[0];
 

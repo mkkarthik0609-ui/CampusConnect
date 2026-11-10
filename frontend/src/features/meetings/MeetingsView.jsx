@@ -11,6 +11,7 @@ import { Notice } from "@/components/app/Notice";
 import { ConfirmDialog, PromptDialog } from "@/components/app/dialogs";
 import { meetingsApi } from "@/lib/endpoints";
 import { queryKeys } from "@/lib/queryClient";
+import { pollEvery } from "@/lib/polling";
 import { cn } from "@/lib/utils";
 import { MeetingCard } from "./MeetingCard";
 import { RespondDialog } from "./RespondDialog";
@@ -26,7 +27,7 @@ export function MeetingsView({ role }) {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [completeTarget, setCompleteTarget] = useState(null);
 
-  const query = useQuery({ queryKey: queryKeys.meetings, queryFn: () => meetingsApi.list(), refetchInterval: 30_000 });
+  const query = useQuery({ queryKey: queryKeys.meetings, queryFn: () => meetingsApi.list(), refetchInterval: (q) => pollEvery(30_000, q) });
   const all = useMemo(() => query.data?.items || [], [query.data]);
 
   const counts = useMemo(() => {

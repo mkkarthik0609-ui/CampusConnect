@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Request
 
 from api.deps import ApiModel, CurrentUser, client_ip, get_current_user, ok, service_errors
 from models import queries
-from services import auth_service
+from services import audit_service, auth_service
 
 router = APIRouter(prefix="/api/account")
 
@@ -26,6 +26,9 @@ def change_password(body: ChangePasswordIn, request: Request, user: CurrentUser 
         auth_service.change_password(
             user["id"], body.current_password, body.new_password, body.confirm_password, ip=client_ip(request),
         )
+    # This device stays signed in; every other session of the account is now rejected (session_version bumped).
+    request.session["sv"] = queries.get_user_by_id(user["id"])["session_version"]
+    audit_service.record(user, "account.password_change", user["id"], ip=client_ip(request))
     return ok("Your password has been changed.")
 
 

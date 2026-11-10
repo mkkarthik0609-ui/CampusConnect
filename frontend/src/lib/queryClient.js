@@ -9,9 +9,9 @@ export const queryClient = new QueryClient({
       gcTime: 5 * 60_000,
       refetchOnWindowFocus: false,
       retry(failureCount, error) {
-        // never retry client errors (validation, auth, not found); retry network/5xx twice
-        if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false;
-        return failureCount < 2;
+        // never retry client errors; GET network errors / 502-504 are already retried with backoff in lib/api.js
+        if (error instanceof ApiError && (error.status < 500 || [502, 503, 504].includes(error.status))) return false;
+        return failureCount < 1;
       },
     },
     mutations: { retry: false },

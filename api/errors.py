@@ -14,6 +14,8 @@ import os
 import re
 from typing import Any, Dict, Optional
 
+import psycopg
+from psycopg_pool import PoolTimeout
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
@@ -238,6 +240,19 @@ def install_error_handlers(app: FastAPI) -> None:
         logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
         return error_response(500, "server_error", "Something went wrong on our end.")
 
+    async def _unique_violation(request: Request, exc: Exception):
+        # A concurrent request won a uniqueness race (registration, chat creation, ...): safe to report as a conflict.
+        return error_response(409, "conflict", "That already exists. Please refresh and try again.")
+
+    async def _db_unavailable(request: Request, exc: Exception):
+        logger.warning("Database unavailable on %s %s: %s", request.method, request.url.path, type(exc).__name__)
+        return error_response(503, "service_unavailable",
+                              "The service is temporarily unavailable. Please try again in a moment.",
+                              headers={"Retry-After": "5"})
+
     for cls, _kind in _service_classes():
         app.add_exception_handler(cls, _service)
+    app.add_exception_handler(psycopg.errors.UniqueViolation, _unique_violation)
+    for cls in (psycopg.OperationalError, PoolTimeout):
+        app.add_exception_handler(cls, _db_unavailable)
     app.add_exception_handler(Exception, _unhandled)
