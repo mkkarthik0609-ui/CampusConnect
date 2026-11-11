@@ -1,3 +1,4 @@
+import hmac
 import os
 import re
 import secrets
@@ -283,10 +284,50 @@ def authenticate(identifier, password, ip=None, role=None):
     return user
 
 
-def authenticate_admin(identifier, password, ip=None):
-    """Email + password sign-in for an active ADMIN account: the real hash check and throttling, in
-    every environment."""
-    return authenticate(identifier, password, ip=ip, role="ADMIN")
+def _provision_admin(email):
+    """First sign-in of a pre-registered admin: the primary admin, or an e-mail the primary admin added (a
+    PENDING invitation), gets its account created now. The password is random and unusable (ID-based login).
+    Returns the user row, or None when this e-mail is not an admin."""
+    cfg = get_settings()
+    db = get_db()
+    inv = None
+    if not cfg.is_primary_admin(email):
+        inv = db.execute("SELECT * FROM admin_invitations WHERE email = ? AND status = 'PENDING' AND expires_at > ?",
+                         (email, sq.fmt(sq.utcnow()))).fetchone()
+        if not inv:
+            return None
+    name = (inv["full_name"] if inv else None) or os.environ.get("ADMIN_NAME", "").strip() or email.split("@")[0]
+    try:
+        queries.create_user("ADMIN", email, _hash(secrets.token_urlsafe(32)), name[:120])
+        if inv:
+            db.execute("UPDATE admin_invitations SET status = 'ACCEPTED', accepted_at = datetime('now') WHERE id = ?",
+                       (inv["id"],))
+            db.commit()
+    except Exception as exc:  # noqa: BLE001 - a concurrent first sign-in created it: use that row
+        db.rollback()
+        if exc.__class__.__name__ != "UniqueViolation":
+            raise
+    return queries.get_user_by_email(email)
+
+
+def authenticate_admin(identifier, admin_id, ip=None):
+    """Email + shared admin ID sign-in (demo): the ID must match ADMIN_ACCESS_ID and the e-mail must belong to an
+    active admin (the primary admin or one the primary admin added). One generic error for every failure;
+    failures are throttled per identifier and per IP like a password login."""
+    ident = normalize_identifier(identifier)
+    if _is_locked_out(ident, ip):
+        raise LockoutError(LOCKOUT_MESSAGE)
+    id_ok = hmac.compare_digest((admin_id or "").strip().encode(), get_settings().admin_access_id.encode())
+    user = queries.get_user_by_email(ident) if id_ok else None
+    if id_ok and not user:
+        user = _provision_admin(ident)
+    if not id_ok or not user or user["role"] != "ADMIN" or not user["is_active"]:
+        sq.record_login_attempt(ident, ip, False)
+        raise ValidationError(GENERIC_LOGIN_ERROR)
+    sq.clear_failures_for_identifier(ident)
+    sq.record_login_attempt(ident, ip, True)
+    sq.touch_last_login(user["id"])
+    return user
 
 
 def change_password(user_id, current_password, new_password, confirm_password, ip=None):

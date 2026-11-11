@@ -122,7 +122,9 @@ class Settings:
     # Admin invitations: public frontend origin used to build invitation links, and e-mail delivery
     # (Resend HTTP API; no key configured => invitations are created but NOT delivered, and the API says so).
     public_app_url: str = "https://campus-connect-network.vercel.app"
-    invite_ttl_hours: int = 72
+    invite_ttl_hours: int = 24 * 30  # an added admin e-mail stays usable for a month (demo: no e-mailed link to rush)
+    # Demo-grade shared admin ID: admins sign in with their e-mail + this ID (no password). Not a secret by design.
+    admin_access_id: str = "campus-connect-123"
     resend_api_key: str = ""
     mail_from: str = ""
 
@@ -178,6 +180,7 @@ class Settings:
             primary_admin_email=(os.environ.get("PRIMARY_ADMIN_EMAIL") or cls.primary_admin_email).strip().lower(),
             public_app_url=(os.environ.get("PUBLIC_APP_URL") or cls.public_app_url).strip().rstrip("/"),
             invite_ttl_hours=max(1, _env_int("INVITE_TTL_HOURS", cls.invite_ttl_hours)),
+            admin_access_id=(os.environ.get("ADMIN_ACCESS_ID") or cls.admin_access_id).strip(),
             resend_api_key=(os.environ.get("RESEND_API_KEY") or "").strip(),
             mail_from=(os.environ.get("MAIL_FROM") or "").strip(),
         )

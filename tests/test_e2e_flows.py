@@ -818,12 +818,10 @@ def test_admin_can_appoint_another_admin_who_has_full_access(app, campus):
     created = api_post(ac, "/api/admin/admin-invitations", json=payload)
     assert created.status_code == 201, created.text
     assert api_post(ac, "/api/admin/admin-invitations", json=payload).status_code == 409
-    token = created.json()["invite_link"].split("#t=", 1)[1]
-    done = api_post(TestClient(app), "/api/auth/admin-invite/accept", json={
-        "token": token, "full_name": "Second Admin", "password": "Chosen#Pass1word", "confirm_password": "Chosen#Pass1word"})
-    assert done.status_code == 201, done.text
+    second = TestClient(app)
+    done = api_post(second, "/api/auth/admin-login", json={"identifier": "admin2@college.edu", "admin_id": "campus-connect-123"})
+    assert done.status_code == 200, done.text
     assert ac.get("/api/admin/admins").json()["total"] == 2
-    second = login_client(app, "admin2@college.edu", "Chosen#Pass1word")
     assert second.get("/api/admin/dashboard").status_code == 200
 
 

@@ -32,9 +32,9 @@ export const authApi = {
     return data;
   },
 
-  /** POST /api/auth/admin-login { identifier, password } -> admin session (email + password, always verified) */
-  async adminLogin({ identifier, password }) {
-    const data = await api.post("/api/auth/admin-login", { identifier, password }, { skipAuthRedirect: true });
+  /** POST /api/auth/admin-login { identifier, admin_id } -> admin session (email + shared admin ID, no password) */
+  async adminLogin({ identifier, adminId }) {
+    const data = await api.post("/api/auth/admin-login", { identifier, admin_id: adminId }, { skipAuthRedirect: true });
     setCsrfToken(data?.csrf_token);
     return data;
   },

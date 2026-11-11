@@ -6,7 +6,8 @@ const ADMIN = { email: "mkkarthik0609@gmail.com", password: "E2e#Admin0wner1" };
 const FACULTY = { email: "e2e.faculty@college.edu", password: "E2e#Passw0rd1" };
 const STUDENT1 = { email: "e2e.student1@college.edu", password: "E2e#Passw0rd1" };
 const STUDENT2 = { email: "e2e.student2@college.edu", password: "E2e#Passw0rd1" };
-const NEW_ADMIN = { email: `second.admin.${Date.now()}@college.edu`, password: "Second#Adm1npass" };
+const ADMIN_ID = "campus-connect-123";
+const NEW_ADMIN = { email: `second.admin.${Date.now()}@college.edu` };
 
 // 1x1 PNG
 const PNG = Buffer.from(
@@ -22,12 +23,22 @@ async function uiLogin(page, path, user) {
   await page.getByRole("button", { name: /sign in|log in|login|open admin portal/i }).first().click();
 }
 
+/** Admin sign-in through the real form: e-mail + shared admin ID (no password). */
+async function uiAdminLogin(page, email, adminId = ADMIN_ID) {
+  await page.goto("/admin-login");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Admin ID").fill(adminId);
+  await page.getByRole("button", { name: /open admin portal/i }).click();
+}
+
 /** API client that is signed in (cookies kept in the context's request jar). */
 async function apiLogin(request, user, url = "/api/auth/login") {
   const session = await (await request.get("/api/auth/session")).json();
   const res = await request.post(url, {
     headers: { "X-CSRFToken": session.csrf_token },
-    data: { identifier: user.email, password: user.password },
+    data: url.endsWith("admin-login")
+      ? { identifier: user.email, admin_id: ADMIN_ID }
+      : { identifier: user.email, password: user.password },
   });
   expect(res.status(), `login ${user.email}`).toBe(200);
   const body = await res.json();
@@ -45,60 +56,51 @@ test("landing page and SPA deep links survive a browser refresh", async ({ page 
   }
 });
 
-test("admin sign-in is email + password only (no passkeys anywhere)", async ({ page }) => {
+test("admin sign-in is email + admin ID (no password, no passkeys)", async ({ page }) => {
   await page.goto("/admin-login");
   await expect(page.locator("body")).not.toContainText(/passkey|webauthn|biometric|security key/i);
-  await uiLogin(page, "/admin-login", ADMIN);
+  await expect(page.getByLabel("Password")).toHaveCount(0);
+  await uiAdminLogin(page, ADMIN.email);
   await expect(page).toHaveURL(/\/admin\/dashboard/);
   await page.goto("/admin/admins");
   await expect(page.locator("body")).not.toContainText(/passkey/i);
   await expect(page.getByText(/invite/i).first()).toBeVisible();
 });
 
-test("wrong admin password is rejected with a generic message", async ({ page }) => {
-  await page.goto("/admin-login");
-  await page.getByLabel("Email").fill(ADMIN.email);
-  await page.getByLabel("Password", { exact: false }).first().fill("definitely-wrong");
-  await page.getByRole("button", { name: /open admin portal|sign in/i }).first().click();
+test("wrong admin ID is rejected with a generic message", async ({ page }) => {
+  await uiAdminLogin(page, ADMIN.email, "definitely-wrong");
   await expect(page).toHaveURL(/admin-login/);
   await expect(page.locator("body")).toContainText(/invalid|incorrect|wrong/i);
 });
 
-test("admin invitation: invite -> accept via fragment link -> sign in -> link is single use", async ({ browser, request }) => {
+test("add admin: primary adds an e-mail -> that admin signs in with the admin ID -> cannot add admins", async ({ browser, request }) => {
   const csrf = await apiLogin(request, ADMIN, "/api/auth/admin-login");
-  const invited = await request.post("/api/admin/admin-invitations", {
+  const added = await request.post("/api/admin/admin-invitations", {
     headers: { "X-CSRFToken": csrf },
     data: { email: NEW_ADMIN.email, full_name: "Second Admin" },
   });
-  expect(invited.status()).toBe(201);
-  const body = await invited.json();
-  // No mail provider on the test stack: the API must say nothing was sent and hand over the one-time link.
-  expect(body.email_delivery).toBe("NOT_CONFIGURED");
-  const link = new URL(body.invite_link);
-  expect(link.hash.startsWith("#t=")).toBe(true);
-  expect(link.search).toBe("");
+  expect(added.status()).toBe(201);
+  const body = await added.json();
+  // Nothing is e-mailed and there is no link: the primary admin tells them the e-mail + admin ID.
+  expect(body.email_delivery).toBe("NONE");
+  expect(body.invite_link).toBeNull();
 
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
-  await page.goto(`${link.pathname}${link.hash}`);
-  await expect(page.getByLabel("Email")).toHaveValue(NEW_ADMIN.email);
-  expect(page.url()).not.toContain("#t="); // the token was stripped from the address bar
-  await page.getByLabel(/^Password/).first().fill(NEW_ADMIN.password);
-  await page.getByLabel(/confirm/i).fill(NEW_ADMIN.password);
-  await page.getByRole("button", { name: /activate|create|set|save|continue/i }).first().click();
-  await expect(page.locator("body")).toContainText(/ready|sign in/i);
-
-  await uiLogin(page, "/admin-login", NEW_ADMIN);
+  await uiAdminLogin(page, NEW_ADMIN.email);
   await expect(page).toHaveURL(/\/admin\/dashboard/);
   // a second admin may not appoint admins
   await page.goto("/admin/admins");
   await expect(page.getByRole("button", { name: /send invitation|invite/i })).toHaveCount(0);
 
-  // the same link cannot be reused
-  const again = await ctx.newPage();
-  await again.goto(`${link.pathname}${link.hash}`);
-  await expect(again.locator("body")).toContainText(/invalid|expired|unavailable/i);
+  // an e-mail the primary admin never added is refused even with the right ID
   await ctx.close();
+  const ctx2 = await browser.newContext();
+  const stranger = await ctx2.newPage();
+  await uiAdminLogin(stranger, `nobody.${Date.now()}@college.edu`);
+  await expect(stranger).toHaveURL(/admin-login/);
+  await expect(stranger.locator("body")).toContainText(/invalid/i);
+  await ctx2.close();
 });
 
 test("student and faculty sign in and reach their dashboards", async ({ browser }) => {

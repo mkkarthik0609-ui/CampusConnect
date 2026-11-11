@@ -104,9 +104,9 @@ def create_invitation(actor, email, full_name=None):
     db.commit()
     row = db.execute("SELECT * FROM admin_invitations WHERE id = ?", (cur.lastrowid,)).fetchone()
     audit_service.record(actor, "admin_invite.create", email)
-    status, link = _deliver(row, token, actor["full_name"])
-    row = db.execute("SELECT * FROM admin_invitations WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return _public(row), status, link
+    # Demo flow: nothing is e-mailed. The primary admin tells the person their e-mail + the admin ID; the account
+    # is created on that person's first sign-in (auth_service.authenticate_admin).
+    return _public(row), "NONE", None
 
 
 def resend_invitation(actor, invitation_id):
@@ -116,14 +116,14 @@ def resend_invitation(actor, invitation_id):
         raise InvitationError("Only a pending invitation can be resent.")
     if row["last_sent_at"] and row["last_sent_at"] > sq.fmt(sq.utcnow() - timedelta(seconds=RESEND_COOLDOWN_SECONDS)):
         raise InvitationError("Please wait a minute before resending.")
-    token = _new_token()  # rotating invalidates the previously e-mailed link
-    db.execute("UPDATE admin_invitations SET token_hash = ?, expires_at = ? WHERE id = ? AND status = 'PENDING'",
-               (_hash(token), _expiry(), invitation_id))
+    # Nothing is sent any more: "resend" just renews the registration window (and retires any old link token).
+    db.execute("UPDATE admin_invitations SET token_hash = ?, expires_at = ?, last_sent_at = datetime('now'), "
+               "send_count = send_count + 1 WHERE id = ? AND status = 'PENDING'",
+               (_hash(_new_token()), _expiry(), invitation_id))
     db.commit()
     audit_service.record(actor, "admin_invite.resend", row["email"])
-    status, link = _deliver(row, token, actor["full_name"])
     row = db.execute("SELECT * FROM admin_invitations WHERE id = ?", (invitation_id,)).fetchone()
-    return _public(row), status, link
+    return _public(row), "NONE", None
 
 
 def revoke_invitation(actor, invitation_id):

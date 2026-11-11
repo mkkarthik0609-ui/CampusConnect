@@ -30,7 +30,7 @@ class LoginIn(CaptchaIn):
 
 class AdminLoginIn(ApiModel):
     identifier: Stripped = Field(min_length=1, max_length=254)
-    password: str = Field(min_length=1, max_length=1024)
+    admin_id: str = Field(min_length=1, max_length=200)
 
 
 class InviteTokenIn(ApiModel):
@@ -132,10 +132,10 @@ def login(body: LoginIn, request: Request):
 
 @router.post("/admin-login")
 def admin_login(body: AdminLoginIn, request: Request):
-    """Email + password for an active admin account (the real password is always verified)."""
+    """Email + shared admin ID (ADMIN_ACCESS_ID) for an admin the primary admin registered. No password."""
     with service_errors():
         try:
-            row = auth_service.authenticate_admin(body.identifier, body.password, ip=client_ip(request))
+            row = auth_service.authenticate_admin(body.identifier, body.admin_id, ip=client_ip(request))
         except auth_service.LockoutError:
             raise
         except ValidationError as exc:

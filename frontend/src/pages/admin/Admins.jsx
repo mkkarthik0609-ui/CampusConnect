@@ -21,7 +21,7 @@ const DELIVERY_LABEL = { SENT: "E-mail sent", FAILED: "E-mail failed", NOT_CONFI
 
 /** Honest result of an invite / resend: only claims delivery when the server says SENT; otherwise shows the one-time link. */
 function InviteResult({ result, onDismiss }) {
-  const sent = result.email_delivery === "SENT";
+  const sent = result.email_delivery === "SENT" || result.email_delivery === "NONE";
   const email = result.invitation?.email;
 
   async function copy() {
@@ -35,7 +35,12 @@ function InviteResult({ result, onDismiss }) {
 
   if (sent) {
     return (
-      <Notice tone="success" title={`Invitation e-mailed to ${email}.`}>
+      <Notice
+        tone="success"
+        title={result.email_delivery === "NONE"
+          ? `${email} can now sign in at Admin Login with that e-mail and the admin ID. Tell them yourself.`
+          : `Invitation e-mailed to ${email}.`}
+      >
         <Button type="button" variant="ghost" size="sm" onClick={onDismiss}>Dismiss</Button>
       </Notice>
     );
@@ -90,7 +95,7 @@ function InviteForm({ onResult }) {
     <section aria-label="Invite administrator" className="rounded-lg border bg-card p-5 shadow-sm">
       <SectionHeading title="Invite administrator" />
       <p className="-mt-1 mb-4 text-sm text-muted-foreground">
-        They receive a single-use link to choose their own password. Admins have the same permissions as you apart from managing admins. Only invite people you trust.
+        Nothing is e-mailed. Give them the admin ID yourself; they sign in at Admin Login with this e-mail and that ID. Admins have the same permissions as you apart from managing admins.
       </p>
       <form onSubmit={submit} noValidate className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-start">
         <FormField label="Email" required error={errors.email}>

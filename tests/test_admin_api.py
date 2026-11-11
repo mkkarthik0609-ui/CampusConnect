@@ -246,9 +246,9 @@ def test_admins_list_and_invite(app, world, admin):
     assert resp.status_code == 201, resp.text
     created = resp.json()
     assert created["invitation"]["email"] == "second.admin@college.edu" and created["invitation"]["status"] == "PENDING"
-    assert created["email_delivery"] == "NOT_CONFIGURED" and "temporary_password" not in created
+    assert created["email_delivery"] == "NONE" and created["invite_link"] is None and "temporary_password" not in created
     data = admin.get("/api/admin/admins").json()
-    assert data["total"] == 1  # nobody is an admin until they accept the invitation
+    assert data["total"] == 1  # nobody is an admin until they sign in for the first time with the admin ID
 
 
 def test_create_admin_email_must_be_unique_case_insensitively(app, world, admin):

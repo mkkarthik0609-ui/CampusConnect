@@ -380,7 +380,9 @@ def list_admins(user: CurrentUser = Depends(require_role("ADMIN"))):
 def _invite_response(message, invitation, delivery, link):
     """`delivery` is SENT / FAILED / NOT_CONFIGURED. The link is only present when the e-mail was NOT sent, so
     the primary admin can pass it on by hand; it is shown once and never stored or logged."""
-    if delivery == "SENT":
+    if delivery == "NONE":
+        detail = "Tell them to sign in at Admin Login with this e-mail and the admin ID."
+    elif delivery == "SENT":
         detail = "Invitation e-mailed."
     elif delivery == "NOT_CONFIGURED":
         detail = ("E-mail delivery is not configured on the server (RESEND_API_KEY / MAIL_FROM), so nothing was "
