@@ -158,7 +158,16 @@ async function send(method, path, { params, body, formData, signal, headers, cac
     }
   }
 
-  if (!res.ok) throw normaliseError(res.status, payload, fallbackFor(res.status));
+  if (!res.ok) {
+    const err = normaliseError(res.status, payload, fallbackFor(res.status));
+    // Render's sleeping-service gateway answers 429/502/503/504 with a non-JSON body: that is "still waking up",
+    // not an app-level rate limit (the app always answers with JSON).
+    if (payload === null && [429, 502, 503, 504].includes(res.status)) {
+      err.code = "gateway";
+      err.message = "The server is waking up. Please try again in a moment.";
+    }
+    throw err;
+  }
   if (!type.includes("application/json") && res.status !== 204) {
     throw new ApiError({ status: 502, code: "bad_response", message: "The server sent an unexpected response." });
   }
@@ -169,8 +178,9 @@ async function send(method, path, { params, body, formData, signal, headers, cac
 // Cold-start resilience (Render Free sleeps; the first request can take 30-60 s)
 // ---------------------------------------------------------------------------------------------
 const WAKE_AFTER_MS = 4000;
-const RETRY_DELAYS = [1500, 4000, 8000]; // GET only: up to 3 retries on network errors / 502 / 503 / 504
-const RETRYABLE = new Set([0, 502, 503, 504]);
+// GET only: retries on network errors / gateway 429 / 502 / 503 / 504 for ~60 s (a Render Free cold start).
+const RETRY_DELAYS = [1500, 3000, 5000, 8000, 10000, 12000, 15000];
+const RETRYABLE = new Set([0, 429, 502, 503, 504]);
 let served = false; // the server has answered at least once in this page load
 let waking = 0;
 const wakeListeners = new Set();
@@ -206,7 +216,9 @@ async function sendWithRetry(method, path, opts = {}) {
         return data;
       } catch (err) {
         if (err instanceof ApiError && err.status > 0) served = true;
+        // A 429 is only retried when it came from the gateway; an app-level 429 (JSON) is a real rate limit.
         const retryable = err instanceof ApiError && RETRYABLE.has(err.status) && err.code !== "bad_response"
+          && (err.status !== 429 || err.code === "gateway")
           && !(err.status === 0 && navigator.onLine === false);
         if (!retryable || attempt >= RETRY_DELAYS.length) throw err;
         mark();
@@ -227,7 +239,7 @@ async function sendWithRetry(method, path, opts = {}) {
 async function request(method, path, opts = {}) {
   const unsafe = !SAFE_METHODS.has(method);
   if (unsafe && !csrfToken) {
-    try { await fetchSession(); } catch { /* the real request below reports the failure */ }
+    await fetchSession(); // wakes a sleeping server (retried); if it still fails, report that instead of a blind POST
   }
   try {
     return await sendWithRetry(method, path, opts);
