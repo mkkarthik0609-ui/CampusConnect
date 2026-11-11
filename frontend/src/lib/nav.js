@@ -41,7 +41,7 @@ export const NAV = {
         { to: "/faculty/chat", label: "Mentor-Connect", icon: MessagesSquare, badge: "messages" },
         { to: "/faculty/meetings", label: "Meetings", icon: CalendarDays },
         { to: "/faculty/approvals", label: "Approvals", icon: CircleCheck },
-        { to: "/faculty/admin-messages", label: "Message Admin", icon: MessagesSquare },
+        { to: "/faculty/admin-connect", label: "Admin Connect", icon: MessagesSquare },
       ],
     },
     {
@@ -72,9 +72,8 @@ export const NAV = {
       label: "Oversight",
       items: [
         { to: "/admin/meetings", label: "Meetings", icon: CalendarDays },
-        { to: "/admin/chats", label: "Chats", icon: MessagesSquare },
         { to: "/admin/approvals", label: "Approvals", icon: CircleCheck },
-        { to: "/admin/faculty-messages", label: "Faculty messages", icon: MessagesSquare },
+        { to: "/admin/admin-connect", label: "Admin Connect", icon: MessagesSquare },
         notifications,
       ],
     },

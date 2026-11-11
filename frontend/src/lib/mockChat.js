@@ -1,6 +1,6 @@
 /**
  * DEV-ONLY in-memory messaging backend for `npm run dev:mock` (see mock.js): student <-> faculty chats
- * (/api/chat/*), faculty <-> admin messages (/api/admin-messages/*) and the admin viewer (/api/admin/chats/*).
+ * (/api/chat/*), and faculty <-> admin messages (/api/admin-messages/*).
  * Mirrors the real contract (docs/api/chat.md): ticks, replies, unsend, delete-for-me, 15-minute edit window,
  * `after_id` + `updated_since` polling, typing and presence. The "other side" reads your messages after a moment
  * and answers a few seconds later so the whole flow can be tried by hand.
@@ -118,34 +118,11 @@ function summary(c, viewer) {
 }
 
 export function handleChatMock({ method, path, url, body, user, json, err }) {
-  if (!user || !/^\/api\/(chat|admin-messages|admin\/chats)/.test(path)) return null;
+  if (!user || !/^\/api\/(chat|admin-messages)/.test(path)) return null;
   tick();
   const q = (k) => url.searchParams.get(k);
   const sort = (rows) => rows.sort((x, y) => (y.last_message_at || "").localeCompare(x.last_message_at || ""));
 
-  // ---- admin viewer
-  let m = path.match(/^\/api\/admin\/chats(?:\/(\d+))?$/);
-  if (m && user.role === "ADMIN") {
-    const chats = Object.values(CONVS).filter((c) => c.kind === "chat");
-    const card = (c) => ({ student: { ...party(c.a, user), full_name: PEOPLE[c.a].name, user_id: c.a, usn: PEOPLE[c.a].usn }, faculty: { ...party(c.b, user), user_id: c.b, faculty_code: PEOPLE[c.b].code, id: PEOPLE[c.b].id } });
-    if (!m[1]) {
-      return json(200, { items: chats.map((c) => {
-        const ms = messages.filter((x) => x.conv === `chat:${c.id}`);
-        const last = ms[ms.length - 1];
-        return { id: c.id, ...card(c), message_count: ms.length, last_message: last ? (last.unsent ? `${PEOPLE[last.sender].name} unsent a message` : last.text) : null, last_message_at: last ? fmt(last.created) : null, created_at: fmt(now()), updated_at: fmt(now()) };
-      }), total: chats.length });
-    }
-    const c = CONVS[`chat:${m[1]}`];
-    if (!c) return err(404, "not_found", "Conversation not found.");
-    const after = Number(q("after_id") || 0);
-    const rows = messages.filter((x) => x.conv === `chat:${c.id}` && (x.id > after || (q("updated_since") && fmt(x.updated) >= q("updated_since").replace("T", " ").slice(0, 19))));
-    const all = messages.filter((x) => x.conv === `chat:${c.id}`);
-    return json(200, {
-      chat: { id: c.id, ...card(c), message_count: all.length, created_at: fmt(now()), updated_at: fmt(now()) },
-      messages: rows.map((x) => { const it = item(x, { id: -1 }, messages); return { ...it, sender_user_id: x.sender, sender_role: PEOPLE[x.sender].role, attachment_url: it.attachment?.url || null, attachment_type: it.attachment?.type, attachment_name: it.attachment?.name }; }),
-      last_id: Math.max(after, ...rows.map((x) => x.id)), server_time: fmt(now()),
-    });
-  }
   if (user.role === "ADMIN" && !path.startsWith("/api/admin-messages")) return null;
 
   const kind = path.startsWith("/api/chat") ? "chat" : "admin";
@@ -163,7 +140,7 @@ export function handleChatMock({ method, path, url, body, user, json, err }) {
     return c ? json(200, { ok: true, message: "Chat opened.", chat_id: c.id }) : err(403, "forbidden", "You do not have permission to message this person.");
   }
 
-  m = rest.match(/^\/messages\/(\d+)\/(edit|unsend|delete-for-me)$/);
+  let m = rest.match(/^\/messages\/(\d+)\/(edit|unsend|delete-for-me)$/);
   if (m && method === "POST") {
     const msg = messages.find((x) => x.id === Number(m[1]) && CONVS[x.conv].kind === kind);
     if (!msg || !convOf(CONVS[msg.conv].id)) return err(404, "not_found", "Message not found.");

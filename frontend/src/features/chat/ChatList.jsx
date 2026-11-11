@@ -49,14 +49,12 @@ export function ChatList({ adapter, selectedId, onSelect }) {
           <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search or start a new chat" />
         </label>
       </div>
-      {adapter.readOnly ? null : (
-        <div className="wa-chips" role="group" aria-label="Filter conversations">
-          <button type="button" className="wa-chip-btn" aria-pressed={!unreadOnly} onClick={() => setUnreadOnly(false)}>All</button>
-          <button type="button" className="wa-chip-btn" aria-pressed={unreadOnly} onClick={() => setUnreadOnly(true)}>
-            Unread{unreadTotal ? ` ${unreadTotal}` : ""}
-          </button>
-        </div>
-      )}
+      <div className="wa-chips" role="group" aria-label="Filter conversations">
+        <button type="button" className="wa-chip-btn" aria-pressed={!unreadOnly} onClick={() => setUnreadOnly(false)}>All</button>
+        <button type="button" className="wa-chip-btn" aria-pressed={unreadOnly} onClick={() => setUnreadOnly(true)}>
+          Unread{unreadTotal ? ` ${unreadTotal}` : ""}
+        </button>
+      </div>
 
       {query.isPending ? (
         <div className="grid grid-cols-1 gap-3 p-4" role="status" aria-busy="true">

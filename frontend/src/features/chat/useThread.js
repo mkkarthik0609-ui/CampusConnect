@@ -116,7 +116,7 @@ export function useThread(adapter, id) {
 
   /** Call on every keystroke: pings the server at most every 3 s. */
   const notifyTyping = useCallback(() => {
-    if (adapter.readOnly || Date.now() - lastTyping.current < TYPING_EVERY_MS) return;
+    if (Date.now() - lastTyping.current < TYPING_EVERY_MS) return;
     lastTyping.current = Date.now();
     adapter.typing(id).catch(() => {});
   }, [adapter, id]);
@@ -126,8 +126,8 @@ export function useThread(adapter, id) {
   const loaded = data !== undefined;
   const incoming = data ? data.messages.filter((m) => !m.is_mine).length : 0;
   useEffect(() => {
-    if (!adapter.readOnly && loaded) refreshList();
-  }, [incoming, loaded, adapter.readOnly, refreshList]);
+    if (loaded) refreshList();
+  }, [incoming, loaded, refreshList]);
 
   return { query, data, pending, send, edit, unsend, hide, notifyTyping };
 }

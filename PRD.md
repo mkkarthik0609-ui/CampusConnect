@@ -119,13 +119,13 @@ An admin can:
 - Manage campus/class data as permitted by the final implementation.
 - View meeting records.
 - View who met whom and when.
-- View all chats.
+- Message faculty through Admin Connect (student/faculty chats are private to the two participants).
 - Review faculty profile/detail-change requests.
 - Approve or reject faculty detail-change requests.
 - Add new admins.
 - Monitor the application.
 
-There is **no public admin signup**. The primary admin (`PRIMARY_ADMIN_EMAIL`) is created by the setup process (bootstrap from environment variables, only if absent). Further admins are invited by the primary admin only, through a single-use, expiring e-mail link; the invitee chooses their own password (no temporary passwords).
+There is **no public admin signup**. The primary admin (`PRIMARY_ADMIN_EMAIL`) is created by the setup process (bootstrap from environment variables, only if absent). Further admins are registered by the primary admin only (by e-mail address); admins sign in with their e-mail plus a shared admin ID (`ADMIN_ACCESS_ID`) and have no password. Nothing is e-mailed.
 
 ---
 
@@ -239,7 +239,7 @@ Faculty can communicate with students who are permitted through the application'
 - A sender may edit their own message only until the recipient has seen it.
 - Edited messages should be clearly marked as edited.
 - Chat history remains available according to the application's access rules.
-- Admin can view all chats.
+- Admin cannot view student/faculty chats.
 
 ### Attachments
 Supported attachment types:
@@ -491,9 +491,8 @@ Admin has broad monitoring access:
 - Meeting records
 - Meeting history
 - Who met whom and when
-- All chats
 
-This is an explicit project requirement.
+Student/faculty chats are NOT visible to admins (privacy decision). Admins message faculty through Admin Connect.
 
 ---
 
@@ -550,7 +549,7 @@ The project is functionally complete when:
 
 ### Admin
 - Admin can see required user data.
-- Admin can see all chats.
+- Admin cannot see student/faculty chats.
 - Admin can see meeting history.
 - Admin can approve/reject faculty detail-change requests.
 - Admin can add admins.
@@ -599,6 +598,6 @@ relationship. Details: `docs/ACADEMIC_HIERARCHY.md`.
 The application runs on free tiers: React SPA on Vercel, FastAPI on Render **Free** (no persistent disk; sleeps after
 about 15 minutes idle with a cold start of up to about a minute, during which the UI shows a "waking the server"
 banner), and **Neon PostgreSQL** Free (0.5 GB, scales to zero when idle). SQLite is no longer used. Uploads are
-stored in the database. Admin accounts beyond the primary admin are created by e-mail invitation only. Classes typed
+stored in the database. Admin accounts beyond the primary admin are registered by the primary admin (e-mail address only). Classes typed
 in by users at signup stay unverified, and out of the public pickers, until an admin verifies them. Capacities and
 limits: `DEPLOYMENT.md`; schema: `DATABASE.md`.

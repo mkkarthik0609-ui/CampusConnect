@@ -3,16 +3,15 @@
  *
  *   key, listKey, threadKey(id)   react-query keys
  *   basePath, selectBy            where a conversation lives: "param" => `${basePath}/:id`, "query" => `${basePath}?c=:id`
- *   title, readOnly, canAttach, showSenderNames, autoOpenSingle, newChat, emptyText
+ *   title, canAttach, autoOpenSingle, newChat, emptyText
  *   fetchList()    -> rows  [{ id, name, src, avatars?, subtitle?, preview, unsent, attachment, mine, status, time, unread, typing, online }]
  *   fetchThread(id, { afterId, since }) -> { other: { id, name, src, avatars?, subtitle, online, lastActiveAt, typing }, messages, lastId, serverTime }
- *   send / edit / unsend / hide / typing   (not used when readOnly)
+ *   send / edit / unsend / hide / typing
  *   headerLink(other) -> { to, label } | null
  */
-import { adminApi, adminKeys, adminMessagesApi, chatApi } from "@/lib/endpoints";
+import { adminMessagesApi, chatApi } from "@/lib/endpoints";
 import { queryKeys } from "@/lib/queryClient";
 
-const IMAGE_TYPES = ["png", "jpg", "jpeg"];
 
 function chatRows(data) {
   return (data?.items || []).map((c) => ({
@@ -54,7 +53,6 @@ export function chatAdapter(role) {
     basePath: student ? "/student/chat" : "/faculty/chat",
     selectBy: "param",
     title: "Mentor-Connect",
-    readOnly: false,
     canAttach: true,
     newChat: { to: student ? "/student/find-faculty" : "/faculty/find-students", label: student ? "Find faculty" : "Find a student" },
     emptyText: student
@@ -79,10 +77,9 @@ export function adminMessagesAdapter(role) {
     key: "admin-messages",
     listKey: key,
     threadKey: (id) => ["admin-messages", "thread", String(id)],
-    basePath: admin ? "/admin/faculty-messages" : "/faculty/admin-messages",
+    basePath: admin ? "/admin/admin-connect" : "/faculty/admin-connect",
     selectBy: "query",
-    title: admin ? "Faculty messages" : "Message Admin",
-    readOnly: false,
+    title: "Admin Connect",
     canAttach: false,
     autoOpenSingle: !admin,
     emptyText: admin ? "No faculty members yet." : "The admin is not available yet.",
@@ -122,58 +119,3 @@ export function adminMessagesAdapter(role) {
     headerLink: () => null,
   };
 }
-
-/** Admin read-only viewer of every student <-> faculty conversation. */
-export const adminChatsAdapter = {
-  key: "admin-chat",
-  listKey: adminKeys.chats,
-  threadKey: (id) => adminKeys.chat(id),
-  basePath: "/admin/chats",
-  selectBy: "param",
-  title: "Chats",
-  readOnly: true,
-  canAttach: false,
-  showSenderNames: true,
-  emptyText: "No conversations yet. Chats start when a student or faculty member sends a first message.",
-  fetchList: async () =>
-    (await adminApi.chats()).items.map((c) => ({
-      id: c.id,
-      name: `${c.student.full_name} and ${c.faculty.full_name}`,
-      avatars: [{ name: c.student.full_name, src: c.student.profile_picture_url }, { name: c.faculty.full_name, src: c.faculty.profile_picture_url }],
-      subtitle: `${c.student.usn} / ${c.faculty.faculty_code}`,
-      preview: c.last_message,
-      unsent: /unsent a message$/.test(c.last_message || ""),
-      time: c.last_message_at || c.updated_at,
-      unread: 0,
-    })),
-  fetchThread: async (id, opts) => {
-    const data = await adminApi.chat(id, opts);
-    const { student, faculty } = data.chat;
-    const messages = data.messages.map((m) => ({
-      id: m.id,
-      is_mine: m.sender_role === "FACULTY",
-      sender_name: m.sender_name,
-      message_text: m.message_text,
-      attachment: m.attachment_url
-        ? { url: m.attachment_url, name: m.attachment_name, type: m.attachment_type, is_image: IMAGE_TYPES.includes((m.attachment_type || "").toLowerCase()) }
-        : null,
-      status: m.status,
-      is_edited: m.is_edited,
-      is_unsent: m.is_unsent,
-      can_edit: false,
-      can_unsend: false,
-      reply_to: m.reply_to && { ...m.reply_to, is_mine: m.reply_to.sender_user_id === faculty.user_id },
-      created_at: m.created_at,
-    }));
-    return {
-      other: {
-        id: data.chat.id, name: `${student.full_name} and ${faculty.full_name}`,
-        avatars: [{ name: student.full_name, src: student.profile_picture_url }, { name: faculty.full_name, src: faculty.profile_picture_url }],
-        subtitle: `Student ${student.usn}, faculty ${faculty.faculty_code} - ${data.chat.message_count} ${data.chat.message_count === 1 ? "message" : "messages"}`,
-        online: false, typing: false,
-      },
-      messages, lastId: data.last_id, serverTime: data.server_time,
-    };
-  },
-  headerLink: () => null,
-};

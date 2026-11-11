@@ -494,7 +494,7 @@ def _chat_with_attachment(app):
     return name
 
 
-def test_chat_attachment_only_for_participants_and_admin(app):
+def test_chat_attachment_only_for_participants(app):
     name = _chat_with_attachment(app)
     url = f"/uploads/chat/{name}"
 
@@ -506,7 +506,11 @@ def test_chat_attachment_only_for_participants_and_admin(app):
     login(third, "other@x.edu", GOOD_PASSWORD)
     assert third.get(url).status_code == 403
 
-    for ident in ("stu@x.edu", "fac@x.edu", "admin@x.edu"):
+    admin = TestClient(app)
+    login(admin, "admin@x.edu", GOOD_PASSWORD)
+    assert admin.get(url).status_code == 403  # admins cannot read student <-> faculty chats
+
+    for ident in ("stu@x.edu", "fac@x.edu"):
         c = TestClient(app)
         login(c, ident, GOOD_PASSWORD)
         resp = c.get(url)

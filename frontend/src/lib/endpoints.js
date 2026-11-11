@@ -39,11 +39,6 @@ export const authApi = {
     return data;
   },
 
-  /** POST /api/auth/admin-invite/inspect { token } -> { email, full_name, expires_at } (400 when invalid / expired) */
-  inspectAdminInvite: (token) => api.post("/api/auth/admin-invite/inspect", { token }, { skipAuthRedirect: true }),
-
-  /** POST /api/auth/admin-invite/accept { token, full_name, password, confirm_password } -> 201 { message } (no auto-login) */
-  acceptAdminInvite: (body) => api.post("/api/auth/admin-invite/accept", body, { skipAuthRedirect: true }),
 
   /** POST /api/auth/logout -> { ok, message, csrf_token } */
   async logout() {

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, Mail, ShieldCheck } from "lucide-react";
+import { Mail, ShieldCheck } from "lucide-react";
 import { PageHeader, SectionHeading } from "@/components/app/PageHeader";
 import { DataTable } from "@/components/app/DataTable";
 import { FormField } from "@/components/app/FormField";
@@ -17,49 +17,12 @@ import { formatDate } from "@/lib/format";
 import { ActivePill, PersonCell } from "@/features/admin/common";
 
 const INVITE_TONE = { PENDING: "warn", EXPIRED: "neutral", ACCEPTED: "ok", REVOKED: "danger" };
-const DELIVERY_LABEL = { SENT: "E-mail sent", FAILED: "E-mail failed", NOT_CONFIGURED: "E-mail not configured", NOT_SENT: "Not sent" };
 
-/** Honest result of an invite / resend: only claims delivery when the server says SENT; otherwise shows the one-time link. */
+/** After adding / renewing an admin: nothing is e-mailed, so remind the primary admin to pass on the admin ID. */
 function InviteResult({ result, onDismiss }) {
-  const sent = result.email_delivery === "SENT" || result.email_delivery === "NONE";
-  const email = result.invitation?.email;
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(result.invite_link);
-      toast.success("Invitation link copied.");
-    } catch {
-      toast.error("Could not copy. Select the link and copy it manually.");
-    }
-  }
-
-  if (sent) {
-    return (
-      <Notice
-        tone="success"
-        title={result.email_delivery === "NONE"
-          ? `${email} can now sign in at Admin Login with that e-mail and the admin ID. Tell them yourself.`
-          : `Invitation e-mailed to ${email}.`}
-      >
-        <Button type="button" variant="ghost" size="sm" onClick={onDismiss}>Dismiss</Button>
-      </Notice>
-    );
-  }
   return (
-    <Notice
-      tone="warning"
-      title={result.email_delivery === "FAILED"
-        ? "E-mail delivery failed - nothing was sent."
-        : "E-mail delivery is not configured - nothing was sent."}
-    >
-      <p className="m-0">The invitation for {email} was created. Share this link with them yourself through a secure channel. It is shown only once; if you lose it, use Resend to create a new one.</p>
-      {result.invite_link ? (
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-          <code className="num min-w-0 flex-1 rounded-md border bg-sunken px-3 py-2 font-mono text-[0.8125rem] break-all select-all">{result.invite_link}</code>
-          <Button type="button" variant="outline" onClick={copy}><Copy aria-hidden="true" />Copy</Button>
-        </div>
-      ) : null}
-      <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={onDismiss}>Dismiss</Button>
+    <Notice tone="success" title={`${result.invitation?.email} can now sign in at Admin Login with that e-mail and the admin ID. Tell them yourself.`}>
+      <Button type="button" variant="ghost" size="sm" onClick={onDismiss}>Dismiss</Button>
     </Notice>
   );
 }
@@ -130,7 +93,7 @@ function InvitationsTable({ onResult }) {
   async function revoke(inv) {
     const ok = await confirm({
       title: `Revoke the invitation for ${inv.email}?`,
-      description: "The link stops working immediately.",
+      description: "They will no longer be able to sign in as an admin.",
       confirmLabel: "Revoke",
       destructive: true,
     });
@@ -161,7 +124,6 @@ function InvitationsTable({ onResult }) {
             </div>
           ) },
           { key: "status", header: "Status", cell: (i) => <StatusPill status={i.status} tone={INVITE_TONE[i.status]} /> },
-          { key: "delivery", header: "Delivery", cell: (i) => <span className="text-sm">{DELIVERY_LABEL[i.delivery_status] || "Unknown"}</span> },
           { key: "expires", header: "Expires", cell: (i) => <span className="num text-sm">{formatDate(i.expires_at)}</span> },
           { key: "actions", header: <span className="sr-only">Actions</span>, label: "", align: "right", cell: (i) => (
             i.status === "PENDING" || i.status === "EXPIRED" ? (

@@ -135,7 +135,7 @@ Errors: 400 (`Message cannot be empty.`, too long, `Attachments cannot be edited
 
 ## POST `/api/chat/messages/{message_id}/unsend`
 Instagram-style **Unsend for everyone**. No body. Only the sender, at any time (even after it was seen), while chat access exists.
-The message becomes a tombstone for both participants *and the admin viewer*: `is_unsent: true`, `unsent_at` set, `message_text` /
+The message becomes a tombstone for both participants: `is_unsent: true`, `unsent_at` set, `message_text` /
 `attachment` / `reply_to` gone, the stored text is wiped and the uploaded file is **deleted from storage** (its URL 404s). It can no longer be
 edited, and replies that quoted it show `reply_to.unsent: true` without the text. The chat list shows `You unsent a message` /
 `<Name> unsent a message`. **Idempotent**: unsending again returns 200 with the tombstone.

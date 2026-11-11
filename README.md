@@ -147,7 +147,7 @@ The old SQLite file can be imported once with `scripts/migrate_sqlite_to_postgre
 There is **no public admin signup**. Choose one:
 
 The **primary admin** (`PRIMARY_ADMIN_EMAIL`, default `mkkarthik0609@gmail.com`) is the owner account: it cannot
-be deactivated or deleted, and only it can invite further admins (Admin -> Admins; single-use e-mailed link, see
+be deactivated or deleted, and only it can add further admins (Admin -> Admins; they sign in with e-mail + admin ID, see
 [`docs/api/admin.md`](docs/api/admin.md)). The primary admin is created with:
 
 ```powershell
@@ -221,11 +221,7 @@ Full rules and the file that implements each check: [`docs/ACADEMIC_HIERARCHY.md
 - Login throttling and temporary lockout (`login_attempts` table): 5 failures per identifier per 15 minutes, a
   per-IP hard limit of 150 (campus Wi-Fi shares one IP) and an image captcha after 10 failures per IP (3 per
   identifier); one generic error for unknown user / wrong password / inactive account.
-- Admin invitations (primary admin only): 256-bit single-use token, only its SHA-256 stored, link
-  `PUBLIC_APP_URL/admin-invite#t=<token>` (URL fragment, never reaches server logs), default 72 h expiry, e-mailed
-  through Resend; if mail is not configured the API says `NOT_CONFIGURED` and returns the link instead of
-  pretending to have sent it. No temporary passwords exist. Public signup cannot claim the primary admin's e-mail
-  or any e-mail with a pending invitation. Sensitive admin actions are written to `audit_log`.
+- Admin registrations (primary admin only): admins have no password; they sign in with e-mail + the shared `ADMIN_ACCESS_ID` (demo-grade), failures are throttled and answer one generic error. Public signup cannot claim the primary admin's e-mail or any e-mail with a pending registration. Sensitive admin actions are written to `audit_log`.
 - Signed session cookie `cc_session`: `HttpOnly`, `SameSite=Lax`, `Secure` in production, absolute (12 h) and
   idle (60 min) timeouts; the user's role and active flag are re-read from the database on every request.
 - CSRF protection on every `POST/PUT/PATCH/DELETE` (header `X-CSRFToken`, constant-time comparison, enforced by
@@ -242,7 +238,7 @@ Full rules and the file that implements each check: [`docs/ACADEMIC_HIERARCHY.md
 - Uploads (8 MB chat attachment, 3 MB profile picture) are validated by extension, size, magic bytes and file
   structure (Pillow decode, PDF `%%EOF`, docx zip with `word/`), stored in PostgreSQL (`file_blobs`) under
   generated names and served only to authorised signed-in users through `/uploads/*` (profile pictures: any
-  signed-in user; chat files: the two participants or an admin; non-images as downloads).
+  signed-in user; chat files: the two participants only; non-images as downloads).
 - All SQL is parameterized. Signup is protected by a single-use image captcha (answer HMAC-hashed at rest, issuing rate limited per IP); login adds one after repeated failures.
 - Proxy-aware client IP (`TRUST_PROXY`, `TRUST_PROXY_HOPS`) so rate limiting works behind Vercel and Render.
 

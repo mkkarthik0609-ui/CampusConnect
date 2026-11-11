@@ -20,8 +20,8 @@ export function Tick({ status }) {
   );
 }
 
-function Quote({ quote, otherName, neutral, onJump }) {
-  const who = quote.is_mine && !neutral ? "You" : quote.sender_name || otherName;
+function Quote({ quote, otherName, onJump }) {
+  const who = quote.is_mine ? "You" : quote.sender_name || otherName;
   let text = quote.text_preview;
   if (quote.unsent) text = "This message was unsent";
   else if (!text && quote.attachment_kind) text = quote.attachment_kind === "image" ? "Photo" : quote.attachment_name || "File";
@@ -68,17 +68,15 @@ async function copyText(text) {
  * One message bubble (WhatsApp Web). Desktop: hover chevron / right-click opens the menu. Touch: long-press opens it,
  * swipe right replies. `pending` = optimistic message that is still being sent.
  */
-export const MessageBubble = memo(function MessageBubble({ m, first, showName, flash, otherName, readOnly, pending, onReply, onEdit, onUnsend, onHide, onJump }) {
+export const MessageBubble = memo(function MessageBubble({ m, first, flash, otherName, pending, onReply, onEdit, onUnsend, onHide, onJump }) {
   const [open, setOpen] = useState(false);
   const [drag, setDrag] = useState(0);
   const touch = useRef(null);
   const timer = useRef(null);
 
   const mine = m.is_mine;
-  // the admin viewer is a third party: name both sides instead of "You"
-  const you = mine && !showName;
-  const sender = you ? "You" : m.sender_name || otherName;
-  const canAct = !readOnly && !pending;
+  const sender = mine ? "You" : m.sender_name || otherName;
+  const canAct = !pending;
   const canReply = canAct && !m.is_unsent;
 
   const stop = () => { clearTimeout(timer.current); timer.current = null; };
@@ -125,17 +123,16 @@ export const MessageBubble = memo(function MessageBubble({ m, first, showName, f
         onContextMenu={(e) => { if (canAct) { e.preventDefault(); setOpen(true); } }}
       >
         <span className="sr-only">{sender}: </span>
-        {showName && first ? <span className="wa-sender" aria-hidden="true">{sender}</span> : null}
 
         {m.is_unsent ? (
           <p className="wa-tombstone">
             <Ban aria-hidden="true" />
-            {you ? "You unsent a message" : `${sender} unsent a message`}
+            {mine ? "You unsent a message" : `${sender} unsent a message`}
             <Meta m={m} pending={pending} bare />
           </p>
         ) : (
           <>
-            {m.reply_to ? <Quote quote={m.reply_to} otherName={otherName} neutral={showName} onJump={onJump} /> : null}
+            {m.reply_to ? <Quote quote={m.reply_to} otherName={otherName} onJump={onJump} /> : null}
             {m.attachment ? <Attachment att={m.attachment} /> : null}
             <p className="wa-text">
               {m.message_text}

@@ -538,7 +538,8 @@ Admin has monitoring access to:
 - Students
 - Faculty
 - Meetings
-- Chats
+
+Admin has no access to student/faculty chats; admins message faculty through Admin Connect.
 
 ---
 
@@ -828,7 +829,7 @@ Admin dashboard should provide sections for:
 - Students
 - Faculty
 - Meetings
-- Chats
+- Admin Connect (messages with faculty)
 - Permission requests
 - Admin management
 
@@ -836,7 +837,7 @@ Admin can:
 - View all student/faculty details.
 - View meeting records.
 - View who met whom and when.
-- View all chats.
+- Message faculty through Admin Connect (student/faculty chats are private).
 - Approve/reject faculty detail changes.
 - Add admins.
 
@@ -1131,7 +1132,6 @@ GET  /admin/dashboard
 GET  /admin/students
 GET  /admin/faculty
 GET  /admin/meetings
-GET  /admin/chats
 GET  /admin/permission-requests
 POST /admin/permission-requests/<id>/approve
 POST /admin/permission-requests/<id>/reject
@@ -1292,7 +1292,7 @@ Test each role separately.
 - View students
 - View faculty
 - View meetings
-- View chats
+- Admin Connect (message faculty)
 - Faculty change approval
 - Add admin
 
@@ -1475,10 +1475,11 @@ per IP.
 
 **Admins.** The primary admin (`PRIMARY_ADMIN_EMAIL`) is bootstrapped with `BOOTSTRAP_ADMIN=1` +
 `ADMIN_NAME/EMAIL/PASSWORD` (Render dashboard only; created only if absent; password never overwritten and dropped
-from the process environment afterwards). It cannot be deactivated or deleted. Further admins are invited by the
-primary admin only: 256-bit single-use token, SHA-256 stored, 72 h default expiry, link
-`PUBLIC_APP_URL/admin-invite#t=<token>`, e-mail via Resend; without mail configuration the API reports
-`email_delivery: "NOT_CONFIGURED"` and returns the one-time link. Admin actions are recorded in `audit_log`.
+from the process environment afterwards). It cannot be deactivated or deleted. Further admins are registered by the
+primary admin only (e-mail address, valid 30 days by default). Admins have no password: they sign in at
+`/api/auth/admin-login` with their e-mail + the shared `ADMIN_ACCESS_ID`, and the account is created on first
+sign-in. Nothing is e-mailed. Admin actions are recorded in `audit_log`. Admins cannot read student/faculty chats;
+they message faculty through Admin Connect.
 
 **Reliability.** Atomic registration/approvals (`db.transaction()`); guarded meeting status transitions
 (`UPDATE ... WHERE status = ...`); `INSERT ... ON CONFLICT DO NOTHING` for chat creation; reminders claimed

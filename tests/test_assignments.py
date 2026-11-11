@@ -698,9 +698,8 @@ def test_removal_revokes_chat_meeting_and_search_even_for_existing_history(app, 
     assert db_one(app, "SELECT status FROM meeting_requests WHERE id = ?", (meeting_id,))["status"] == "PENDING"
     assert db_count(app, "supporting_relationships") == 0
 
-    # history is kept, and the admin can still read it
+    # history is kept
     assert db_count(app, "messages") == 1
-    assert admin.get(f"/api/admin/chats/{chat['id']}").status_code == 200
 
     # FAC001's other classes and FAC002's access are unaffected
     assert can_reach(app, fac, world["stu"][AIML_3A])

@@ -435,9 +435,9 @@ def test_chat_open_send_edit_seen_lock_and_listing(app, world):
     assert sc.get("/api/chat/99999").status_code in (403, 404)
     assert api_post(sc, "/api/chat/messages/99999/edit", json={"message_text": "x"}).status_code == 404
     assert db_count(app, "messages") == 2
-    # the admin can read every conversation (read-only)
-    detail = world["ac"].get(f"/api/admin/chats/{chat_id}").json()
-    assert [m["message_text"] for m in detail["messages"]] == ["Hello sir (edited)", "Welcome"]
+    # the admin can not read student <-> faculty conversations
+    assert world["ac"].get(f"/api/admin/chats/{chat_id}").status_code == 404
+    assert world["ac"].get(f"/api/chat/{chat_id}").status_code in (403, 404)
 
 
 def test_chat_access_rules_and_attachments(app, world):
@@ -464,7 +464,7 @@ def test_chat_access_rules_and_attachments(app, world):
     att = resp.json()["item"]["attachment"]
     assert att["name"] == "notes.png" and att["is_image"] and att["url"].startswith("/uploads/chat/")
     assert sc.get(att["url"]).status_code == 200 and fc.get(att["url"]).status_code == 200
-    assert world["ac"].get(att["url"]).status_code == 200
+    assert world["ac"].get(att["url"]).status_code == 403  # admins cannot open chat attachments
     assert oc.get(att["url"]).status_code == 403 and anon(app).get(att["url"]).status_code == 401
     # bad attachments are refused and not stored
     bad = api_post(sc, f"/api/chat/{chat_id}/messages",
@@ -783,7 +783,7 @@ def test_every_admin_page_loads_with_real_data(app, world):
 
     paths = [
         "/api/admin/dashboard", "/api/admin/students", "/api/admin/faculty", "/api/admin/meetings",
-        "/api/admin/chats", f"/api/admin/chats/{chat_id}", "/api/admin/permission-requests", "/api/admin/admins",
+        "/api/admin/permission-requests", "/api/admin/admins",
         "/api/admin/academics", "/api/admin/assignments", "/api/admin/classes", f"/api/admin/classes/{world['sid']}",
         "/api/admin/assignment-requests", f"/api/admin/students?section_id={world['sid']}",
         "/api/admin/meetings?status=PENDING",
@@ -799,8 +799,7 @@ def test_every_admin_page_loads_with_real_data(app, world):
     assert set(faculty) == {"FAC700", "FAC701"}
     assert [a["section_id"] for a in faculty["FAC700"]["assignments"]] == [world["sid"]]
     assert faculty["FAC701"]["pending_request_count"] == 1
-    assert ac.get("/api/admin/chats").json()["items"][0]["message_count"] == 1
-    assert ac.get("/api/admin/chats/99999").status_code == 404
+    assert ac.get("/api/admin/chats").status_code == 404  # admins cannot read student <-> faculty chats
     assert ac.get("/api/admin/classes/99999").status_code == 404
     assert ac.get("/api/admin/meetings?status=bogus").status_code == 400
     assert ac.get("/api/admin/assignments").json()["pending_count"] == 1

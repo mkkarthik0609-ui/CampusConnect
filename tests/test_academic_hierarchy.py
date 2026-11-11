@@ -836,8 +836,6 @@ def test_remove_registration_blocks_login_keeps_history_and_frees_identifiers(ap
     assert db_one(app, "SELECT cancelled_by FROM meeting_requests WHERE id = ?", (m_open,))["cancelled_by"] == "FACULTY"
     # notifications are kept too
     assert db_count(app, "notifications", "user_id = ?", (stu["user_id"],)) >= 1
-    # ... and the admin can still read the conversation
-    assert admin_client.get(f"/api/admin/chats/{chat_id}").json()["chat"]["message_count"] == 2
 
 
 def test_removed_student_can_register_again_with_same_email_and_usn_and_other_class(app, admin_client):

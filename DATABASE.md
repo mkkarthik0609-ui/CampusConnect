@@ -207,13 +207,12 @@ Direct messages between an admin and a faculty member (same message features as 
 edit, unsend, "delete for me", replies).
 
 ### `admin_invitations` (migration 0002)
-Admin invitations created by the primary admin. `email` (CITEXT), `full_name`, **`token_hash`** (SHA-256 of a
-256-bit random token; the token itself is never stored or logged), `status` (`PENDING` / `ACCEPTED` / `REVOKED`;
-`EXPIRED` is derived from `expires_at`), `invited_by`, `expires_at` (default now + `INVITE_TTL_HOURS`, 72 h),
-`last_sent_at`, `send_count`, `delivery_status` (`NOT_SENT` / `SENT` / `FAILED` / `NOT_CONFIGURED`), `accepted_at`,
-`accepted_user_id`. A partial unique index allows **one `PENDING` invitation per e-mail**. Acceptance is a single
-atomic `UPDATE ... WHERE status='PENDING'` inside the transaction that creates the admin account, so a token works
-exactly once. Resend rotates the token (60 s cooldown).
+Admin registrations created by the primary admin (nothing is e-mailed). `email` (CITEXT), `full_name`, `token_hash`
+(legacy column, filled with a random hash and no longer used for any link), `status` (`PENDING` / `ACCEPTED` /
+`REVOKED`; `EXPIRED` is derived from `expires_at`), `invited_by`, `expires_at` (default now + `INVITE_TTL_HOURS`,
+720 h), `last_sent_at`, `send_count`, `delivery_status` (legacy, always `NOT_SENT`), `accepted_at`, `accepted_user_id`.
+A partial unique index allows **one `PENDING` row per e-mail**. The row turns `ACCEPTED` when that person signs in
+at Admin Login for the first time (the admin account is created then). Resend renews `expires_at` (60 s cooldown).
 
 ### `file_blobs` (migration 0002)
 All uploads: `path` (PK, the key used in URLs: `chat/<uuid>.<ext>` or `profile/<students|faculty>/<uuid>.<ext>`),
@@ -224,7 +223,7 @@ picture. Neon Free offers 0.5 GB for the whole database; to move uploads to R2/S
 
 ### `audit_log` (migration 0002)
 Append-only trail of sensitive admin/account actions: `actor_user_id`, `actor_email`, `action` (for example
-`admin.invite`, `admin.activate`, `admin.deactivate`, password change), `target`, `detail`, `ip`, `created_at`.
+`admin_invite.create`, `admin.activate`, `admin.deactivate`, password change), `target`, `detail`, `ip`, `created_at`.
 
 ### `presence` (migration 0002)
 `user_id` (PK) and `last_seen_epoch`. "Last active" survives restarts; writes are throttled to one per user per

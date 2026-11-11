@@ -23,8 +23,7 @@ const LEDGER = [
 const QUICK = [
   { to: "/admin/academics", label: "Academic structure", hint: "Branches, departments, years and sections", icon: Layers },
   { to: "/admin/assignments", label: "Faculty assignments", hint: "Who teaches and mentors which class", icon: Link2 },
-  { to: "/admin/chats", label: "Chats", hint: "Read-only view of every conversation", icon: MessagesSquare },
-  { to: "/admin/faculty-messages", label: "Faculty messages", hint: "Read and reply to faculty", icon: MessagesSquare },
+  { to: "/admin/admin-connect", label: "Admin Connect", hint: "Message faculty directly", icon: MessagesSquare },
 ];
 
 function Attention({ to, count, title, children, icon: Icon }) {

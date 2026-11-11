@@ -122,7 +122,7 @@ def test_no_passkey_surface_remains(app, owner):
 
 def test_primary_adds_an_email_and_that_admin_signs_in_with_the_id(app, owner):
     body = add_admin(owner["client"])
-    assert body["email_delivery"] == "NONE" and body["invite_link"] is None
+    assert "email_delivery" not in body and "invite_link" not in body
     assert body["invitation"]["status"] == "PENDING"
     assert db_count(app, "users", "email = 'second@college.edu'") == 0  # no account until first sign-in
     # an unregistered e-mail with the right ID is still refused
@@ -163,7 +163,7 @@ def test_expired_registration_cannot_sign_in_until_renewed(app, owner):
     assert db_count(app, "users", "email = 'second@college.edu'") == 0
     assert owner["client"].get("/api/admin/admin-invitations").json()["items"][0]["status"] == "EXPIRED"
     renewed = api_post(owner["client"], f"/api/admin/admin-invitations/{inv_id}/resend")  # "Resend" now renews
-    assert renewed.status_code == 200 and renewed.json()["email_delivery"] == "NONE"
+    assert renewed.status_code == 200 and "invite_link" not in renewed.json()
     assert admin_login(TestClient(app), SECOND).status_code == 200
 
 

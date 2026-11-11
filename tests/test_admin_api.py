@@ -7,12 +7,12 @@ from fastapi.testclient import TestClient
 from models import queries
 from services import chat_service, meeting_service, permission_service
 from tests.conftest import (
-    ADMIN_EMAIL, PASSWORD, api_login, api_post, create_admin, create_faculty, create_student, assign, login_client,
+    ADMIN_EMAIL, api_post, create_admin, create_faculty, create_student, assign, login_client,
     section_id_for, db_one, db_all, db_count, db_exec,
 )
 
 ADMIN_GETS = ["/api/admin/dashboard", "/api/admin/students", "/api/admin/faculty", "/api/admin/meetings",
-              "/api/admin/chats", "/api/admin/chats/1", "/api/admin/permission-requests", "/api/admin/admins"]
+              "/api/admin/permission-requests", "/api/admin/admins"]
 NEW_ADMIN = {"full_name": "Second Admin", "email": "Second.Admin@College.edu"}
 
 
@@ -134,44 +134,15 @@ def test_meetings_list_carries_names_class_and_status(app, world, admin):
 
 # ---------------------------------------------------------------- chats
 
-def test_chats_list_and_read_only_detail(app, world, admin):
+def test_admin_cannot_read_student_faculty_chats(app, world, admin):
     stu, fac = world["stu"], world["fac"]
     with app.app_context():
         chat = chat_service.open_chat(stu["student_id"], fac["faculty_id"], stu["user_id"])
-        chat_service.send_text_message(chat["id"], stu["user_id"], "hello sir")
-        chat_service.send_text_message(chat["id"], fac["user_id"], "hello")
-        queries.create_message(chat["id"], stu["user_id"], None, "chat/abc123.png", "image", "notes.png")
-    data = admin.get("/api/admin/chats").json()
-    assert data["total"] == 1
-    row = data["items"][0]
-    assert row["id"] == chat["id"] and row["message_count"] == 3
-    assert row["student"]["full_name"] == "Asha Student" and row["student"]["usn"] == "1AB21CS001"
-    assert row["student"]["class"]["label"] == "CSE → AIML → 3rd Year → A"
-    assert row["faculty"]["faculty_code"] == "FAC001" and row["last_message_at"]
-
-    detail = admin.get(f"/api/admin/chats/{chat['id']}").json()
-    assert detail["chat"]["message_count"] == 3 and detail["chat"]["student"]["id"] == stu["student_id"]
-    msgs = detail["messages"]
-    assert [(m["sender_role"], m["message_text"]) for m in msgs] == [
-        ("STUDENT", "hello sir"), ("FACULTY", "hello"), ("STUDENT", None)]
-    assert msgs[0]["sender_name"] == "Asha Student" and msgs[1]["sender_name"] == "Dr One"
-    assert msgs[2]["attachment_url"] == "/uploads/chat/abc123.png" and msgs[2]["attachment_name"] == "notes.png"
-    assert msgs[0]["attachment_url"] is None and msgs[0]["is_seen"] is False and msgs[0]["is_edited"] is False
-    assert {"id", "sender_user_id", "attachment_type", "seen_at", "created_at"} <= set(msgs[0])
-    err(admin.get("/api/admin/chats/99999"), 404, "not_found")
-    err(admin.get("/api/admin/chats/abc"), 400, "validation_error")
-    # read-only: no mutating method exists on a chat
-    for method in ("post", "put", "patch", "delete"):
-        assert getattr(admin, method)(f"/api/admin/chats/{chat['id']}").status_code in (403, 400, 405, 404)
-    assert db_count(app, "messages") == 3
-
-
-def test_admin_reading_a_chat_does_not_mark_messages_seen(app, world, admin):
-    stu, fac = world["stu"], world["fac"]
-    with app.app_context():
-        chat = chat_service.open_chat(stu["student_id"], fac["faculty_id"], stu["user_id"])
-        chat_service.send_text_message(chat["id"], stu["user_id"], "unread")
-    admin.get(f"/api/admin/chats/{chat['id']}")
+        chat_service.send_text_message(chat["id"], stu["user_id"], "private hello")
+    for path in ("/api/admin/chats", f"/api/admin/chats/{chat['id']}", f"/api/chat/{chat['id']}", "/api/chat"):
+        resp = admin.get(path)
+        assert resp.status_code in (403, 404), path
+        assert "private hello" not in resp.text
     assert db_one(app, "SELECT is_seen FROM messages")["is_seen"] == 0
 
 
@@ -246,7 +217,7 @@ def test_admins_list_and_invite(app, world, admin):
     assert resp.status_code == 201, resp.text
     created = resp.json()
     assert created["invitation"]["email"] == "second.admin@college.edu" and created["invitation"]["status"] == "PENDING"
-    assert created["email_delivery"] == "NONE" and created["invite_link"] is None and "temporary_password" not in created
+    assert "email_delivery" not in created and "invite_link" not in created and "temporary_password" not in created
     data = admin.get("/api/admin/admins").json()
     assert data["total"] == 1  # nobody is an admin until they sign in for the first time with the admin ID
 

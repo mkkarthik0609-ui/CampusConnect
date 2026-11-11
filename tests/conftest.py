@@ -20,7 +20,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 # (the repo-root .env holds the Neon URLs; python-dotenv never overrides variables that are already set).
 os.environ["DATABASE_URL"] = ""
 os.environ["DATABASE_URL_POOLED"] = ""
-os.environ["RESEND_API_KEY"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
 

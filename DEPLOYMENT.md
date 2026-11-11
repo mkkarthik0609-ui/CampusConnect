@@ -30,7 +30,6 @@ Files involved: `render.yaml`, `requirements.txt`, `.python-version`, `migration
 |---|---|---|
 | Render Free web service | 512 MB RAM, 0.1 CPU, 750 instance hours/month, **no persistent disk**, spins down after ~15 min without inbound traffic | Cold start of up to ~60 s on the first request after idle. The UI shows a "waking the server" banner and retries idempotent GETs. The in-process reminder job does not run while the service sleeps. Local files are wiped on every restart/deploy, which is why uploads live in PostgreSQL. |
 | Neon Free | 0.5 GB storage per project, compute scales to zero after 5 min idle (first query then costs about +0.5-2 s), 100 CU-hours/month, point-in-time restore window of 7 days | The database holds uploads too (see "Upload storage capacity"). The app retries connections with backoff (connect timeout 15 s) so a waking compute does not fail the request. |
-| Resend Free | 100 e-mails/day; the sender must be on a verified domain (exception: the account owner's own address) | Only admin invitations are e-mailed. Without a configured key the API says so (`email_delivery: "NOT_CONFIGURED"`) and hands the one-time link to the primary admin. |
 | Vercel Hobby | Non-commercial use; check current terms | Static hosting + rewrites only. |
 
 Free-tier quotas change; verify the current numbers on each provider's pricing page before launch.
@@ -137,10 +136,9 @@ Names only; set the values in the Render dashboard. Every variable the backend r
 | `TRUST_PROXY_HOPS` | `2` | Proxies appending to `X-Forwarded-For`: Vercel + Render's load balancer. Use `1` if a custom domain points straight at Render and Vercel is not in the path. |
 | `BOOTSTRAP_ADMIN` | `1` for the first start, then `0` | Creates the primary admin from the three variables below. |
 | `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | *(typed in the dashboard)* | Never commit these. `ADMIN_EMAIL` must equal `PRIMARY_ADMIN_EMAIL`. |
-| `PRIMARY_ADMIN_EMAIL` | `mkkarthik0609@gmail.com` (default) | The owner admin. Cannot be deactivated or deleted; only this admin invites further admins. |
-| `PUBLIC_APP_URL` | `https://campus-connect-network.vercel.app` (default) | Public frontend origin used to build invitation links. Set it to your real domain. |
-| `INVITE_TTL_HOURS` | `72` (default) | Lifetime of an admin invitation. |
-| `RESEND_API_KEY`, `MAIL_FROM` | *(dashboard only; optional)* | E-mail delivery for admin invitations. Without them invitations are created but not delivered. |
+| `PRIMARY_ADMIN_EMAIL` | `mkkarthik0609@gmail.com` (default) | The owner admin. Cannot be deactivated or deleted; only this admin adds further admins. |
+| `INVITE_TTL_HOURS` | `720` (default, 30 days) | How long an added admin e-mail stays registered. |
+| `ADMIN_ACCESS_ID` | `campus-connect-123` (default) | Shared admin ID used with an admin e-mail at Admin Login. Demo-grade by design. |
 | `REMINDER_INTERVAL_MINUTES` | `60` | Meeting-reminder job interval. |
 | `ENABLE_SCHEDULER` | `1` (default) | `0` turns the reminder job off. |
 | `SEED_EXTRA_BRANCHES` | `1` (default) | `0` skips seeding the extra branches (ECE, ISE, Mechanical, ...) next to CSE. |
@@ -191,11 +189,7 @@ There is no public admin signup.
 3. After the first successful start and a successful admin login, **remove `ADMIN_PASSWORD` and set
    `BOOTSTRAP_ADMIN=0`** in Render. Leaving them is not harmful to existing data but keeps a secret around for no
    reason.
-4. Further admins are **invited** by the primary admin inside the app (Admin -> Admins): an e-mail with a
-   single-use link (token in the URL fragment, only its SHA-256 stored, valid `INVITE_TTL_HOURS`) lets the invitee
-   choose their own password. There are no temporary passwords. If `RESEND_API_KEY` / `MAIL_FROM` are not set the
-   API answers `email_delivery: "NOT_CONFIGURED"` and returns the one-time link so the primary admin can share it
-   manually; delivery is never claimed when it did not happen.
+4. Further admins are **added** by the primary admin inside the app (Admin -> Admins). Nothing is e-mailed: the person signs in at Admin Login with their e-mail and the shared admin ID (`ADMIN_ACCESS_ID`, default `campus-connect-123`) and the account is created on first sign-in. There are no admin passwords.
 5. Fallback from the Render Shell tab: `python create_admin.py --from-env`.
 
 ### Upload storage capacity
@@ -290,8 +284,7 @@ Allow up to a minute for the first request if the service was asleep.
       the normal UI sign-out (which sends the header) works.
 - [ ] `/api/*` responses are `Cache-Control: no-store` (also check `x-vercel-cache` is not `HIT`).
 - [ ] Admin -> Academics shows CSE with AIML, AIDE, GenAI, Cybersecurity, Blockchain, IoT.
-- [ ] Admin -> Admins: invite a second admin. Either the e-mail arrives or the response shows the one-time link
-      (`NOT_CONFIGURED`); the link opens `/admin-invite` and lets the invitee choose a password.
+- [ ] Admin -> Admins: add a second admin e-mail; that person signs in at Admin Login with the e-mail and the admin ID.
 - [ ] Register a faculty account; Admin assigns it a class (e.g. CSE -> AIML -> 3rd Year -> A).
 - [ ] Register a student in that class; the signup form (with its captcha) works.
 - [ ] Student sees the assigned faculty; chat and a meeting request between them work.
@@ -337,7 +330,7 @@ python scripts/migrate_sqlite_to_postgres.py --sqlite database.db --uploads uplo
 ```
 
 It is a dry run unless `--apply` is given, refuses to write into non-empty tables, never deletes anything, and does
-**not** copy admin accounts unless `--include-admins` is passed (admins are bootstrapped / invited instead).
+**not** copy admin accounts unless `--include-admins` is passed (admins are bootstrapped / added by the primary admin instead).
 Run it with `DATABASE_URL` set to the Neon **direct** URL, after the app has applied its migrations.
 
 ## 6. Rotating `SECRET_KEY`
@@ -368,7 +361,6 @@ that bumps their `session_version` and ends all their other sessions without tou
 | Users are logged out after each deploy | `SECRET_KEY` changed. `generateValue` generates once; do not regenerate. |
 | Render health check failing | Check Logs; a missing or short `SECRET_KEY` makes production start-up fail by design. |
 | Login throttling locks everybody out | `TRUST_PROXY` / `TRUST_PROXY_HOPS` are wrong so all users share one IP (a proxy address). Check the hop count (2 with Vercel, 1 without). |
-| Invitation created but no e-mail | `RESEND_API_KEY` / `MAIL_FROM` missing, or the sender domain is not verified in Resend. Use the one-time link from the API response, or fix the mail settings and use "resend" (60 s cooldown). |
 | Uploads fail or the database is full | Neon Free storage (0.5 GB) is used up; see "Upload storage capacity". |
 
 ## 8. Running the tests
@@ -381,7 +373,7 @@ python -m pytest tests -n 4
 The tests need a **throw-away PostgreSQL server**. Set `TEST_DATABASE_ADMIN_URL` to a superuser connection
 (default `postgresql://postgres@127.0.0.1:54329/postgres`); the suite creates and drops its own `cc_test_*`
 databases there. **Never point it at Neon production.** `tests/conftest.py` blanks `DATABASE_URL`,
-`DATABASE_URL_POOLED` and `RESEND_API_KEY` as a safety net.
+and `DATABASE_URL_POOLED` as a safety net.
 
 ## 9. Owner action list
 
@@ -391,7 +383,7 @@ databases there. **Never point it at Neon production.** `tests/conftest.py` blan
 **Render**
 1. Push the repo to GitHub.
 2. New -> Blueprint -> select the repo -> set `DATABASE_URL`, `DATABASE_URL_POOLED`, `ADMIN_NAME`,
-   `ADMIN_EMAIL`, `ADMIN_PASSWORD` (and optionally `RESEND_API_KEY`, `MAIL_FROM`, `PUBLIC_APP_URL`) -> Apply.
+   `ADMIN_EMAIL`, `ADMIN_PASSWORD` -> Apply.
 3. Wait for Live; check `/healthz`; copy the service URL.
 4. After the first successful admin login: remove `ADMIN_PASSWORD`, set `BOOTSTRAP_ADMIN=0`.
 

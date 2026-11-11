@@ -155,13 +155,13 @@ export function ThreadPane({ adapter, id, onBack, single }) {
                 <Skeleton className="h-14 w-2/3 rounded-lg" />
               </div>
             ) : items.length === 0 ? (
-              <div className="wa-day"><span className="wa-note">{adapter.readOnly ? "No messages in this chat." : `No messages yet. Say hello to ${name}.`}</span></div>
+              <div className="wa-day"><span className="wa-note">No messages yet. Say hello to {name}.</span></div>
             ) : (
               <ul role="log" aria-label={`Messages with ${name}`} className="wa-messages">
                 {items.map((m, i) => {
                   const prev = items[i - 1];
                   const newDay = !prev || dayKey(prev.created_at) !== dayKey(m.created_at);
-                  const first = newDay || prev.is_mine !== m.is_mine || (adapter.showSenderNames && prev.sender_name !== m.sender_name);
+                  const first = newDay || prev.is_mine !== m.is_mine;
                   return (
                     <Fragment key={m.id}>
                       {newDay ? <li className="wa-day"><span>{dayLabel(m.created_at)}</span></li> : null}
@@ -171,10 +171,8 @@ export function ThreadPane({ adapter, id, onBack, single }) {
                       <MessageBubble
                         m={m}
                         first={first}
-                        showName={!!adapter.showSenderNames}
                         flash={flashId === m.id}
                         otherName={name}
-                        readOnly={adapter.readOnly}
                         pending={typeof m.id === "string"}
                         onReply={startReply}
                         onEdit={startEdit}
@@ -196,9 +194,6 @@ export function ThreadPane({ adapter, id, onBack, single }) {
             </button>
           ) : null}
 
-          {adapter.readOnly ? (
-            <p className="wa-readonly m-0">Read-only view. Opening a conversation does not mark anything as seen.</p>
-          ) : (
             <Composer
               canAttach={adapter.canAttach}
               disabled={query.isPending}
@@ -220,7 +215,6 @@ export function ThreadPane({ adapter, id, onBack, single }) {
               }}
               onSave={(text) => edit(editing.id, text)}
             />
-          )}
         </>
       )}
 

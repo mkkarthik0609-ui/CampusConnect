@@ -1,9 +1,8 @@
 """WhatsApp-style messaging on both message tables (student <-> faculty chats, faculty <-> admin messages):
 delivery ticks, replies, unsend / delete-for-me, the 15-minute edit window, polling with ``updated_since``,
-typing + presence, and the admin read-only viewer. Access rules themselves are covered in test_chat_service /
+typing + presence. Access rules themselves are covered in test_chat_service /
 test_access_control; here we only re-check that the new endpoints honour them."""
 import io
-import os
 
 import pytest
 
@@ -229,7 +228,7 @@ def test_unsend_deletes_the_uploaded_file_and_hides_it_from_everyone(app, pair):
     assert fc.get("/api/chat").json()["items"][0]["last_message"].endswith("unsent a message")
 
 
-def test_unsent_content_never_leaks_to_the_admin_or_into_quotes(app, pair):
+def test_unsent_content_never_leaks_into_quotes(app, pair):
     sc, fc, cid = pair["sc"], pair["fc"], pair["chat_id"]
     target = _send(sc, cid, "top secret")
     quoting = _send(fc, cid, "ok", reply_to_id=target["id"])
@@ -237,18 +236,9 @@ def test_unsent_content_never_leaks_to_the_admin_or_into_quotes(app, pair):
     quote = {m["id"]: m for m in _thread(fc, cid)["messages"]}[quoting["id"]]["reply_to"]
     assert quote["unsent"] is True and quote["text_preview"] is None
 
-    ac = login_client(app, ADMIN_EMAIL)
-    detail = ac.get(f"/api/admin/chats/{cid}").json()
-    tomb = detail["messages"][0]
-    assert tomb["is_unsent"] is True and tomb["message_text"] is None and tomb["attachment_url"] is None
-    assert "top secret" not in ac.get(f"/api/admin/chats/{cid}").text
-    assert detail["messages"][1]["reply_to"]["unsent"] is True
-    listing = ac.get("/api/admin/chats").json()["items"][0]
-    assert "top secret" not in str(listing)
     # a message that quoted something and is then unsent forgets its quote
     api_post(fc, f"/api/chat/messages/{quoting['id']}/unsend")
     assert db_one(app, "SELECT reply_to_id FROM messages WHERE id = ?", (quoting["id"],))["reply_to_id"] is None
-    assert ac.get("/api/admin/chats").json()["items"][0]["last_message"].endswith("unsent a message")
 
 
 def test_unsend_and_delete_for_me_need_current_chat_access(app, pair):
@@ -283,9 +273,8 @@ def test_delete_for_me_hides_only_for_that_user(app, pair):
     assert [m["message_text"] for m in _thread(fc, cid)["messages"]] == ["one"]
     # updated_since never resurrects a hidden message
     assert _thread(sc, cid, updated_since="2000-01-01T00:00:00Z")["messages"][0]["message_text"] == "two"
-    # the admin viewer still sees everything
-    admin_view = login_client(app, ADMIN_EMAIL).get(f"/api/admin/chats/{cid}").json()
-    assert [m["message_text"] for m in admin_view["messages"]] == ["one", "two"]
+    # hiding is per-user: both rows still exist
+    assert db_count(app, "messages") == 2
     assert api_post(fc, "/api/chat/messages/99999/delete-for-me").status_code == 404
 
 

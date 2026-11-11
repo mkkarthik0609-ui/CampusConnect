@@ -1,10 +1,8 @@
-"""Administrator invitations (primary admin only).
+"""Admin registrations (primary admin only).
 
-Flow: invite (token generated, only its SHA-256 stored) -> e-mail with a link whose token sits in the URL
-*fragment* (``/admin-invite#t=...``, so it is never sent to any server log) -> invitee opens it, chooses a
-password -> the account is created ACTIVE in one transaction that also consumes the invitation. Tokens are
-single-use (atomic ``UPDATE ... WHERE status='PENDING'``), expire, and can be resent (rotates the token) or
-revoked. The raw token / link is never logged or stored."""
+The primary admin adds an admin's e-mail (an ``admin_invitations`` row). Nothing is e-mailed: the person signs in at
+Admin Login with that e-mail + the shared ADMIN_ACCESS_ID and the account is created on first sign-in
+(``auth_service.authenticate_admin``). "Resend" renews the registration window; a pending row can be revoked."""
 import hashlib
 import secrets
 from datetime import timedelta
@@ -13,12 +11,11 @@ from api.db import get_db
 from api.settings import get_settings
 from models import queries
 from models import security_queries as sq
-from services import audit_service, auth_service, mail_service
-from services.auth_service import ConflictError, ValidationError, hash_password, validate_email
+from services import audit_service
+from services.auth_service import ConflictError, validate_email
 from services.errors import ServiceError
 
 RESEND_COOLDOWN_SECONDS = 60
-INVALID_LINK = "This invitation link is invalid or has expired. Ask the primary administrator to send a new one."
 
 
 class InvitationError(ServiceError):
@@ -37,10 +34,6 @@ def _expiry():
     return sq.fmt(sq.utcnow() + timedelta(hours=get_settings().invite_ttl_hours))
 
 
-def invite_link(token: str) -> str:
-    return f"{get_settings().public_app_url}/admin-invite#t={token}"
-
-
 def derived_status(row) -> str:
     if row["status"] == "PENDING" and row["expires_at"] <= sq.fmt(sq.utcnow()):
         return "EXPIRED"
@@ -51,7 +44,6 @@ def _public(row):
     return {
         "id": row["id"], "email": row["email"], "full_name": row["full_name"], "status": derived_status(row),
         "created_at": row["created_at"], "expires_at": row["expires_at"], "last_sent_at": row["last_sent_at"],
-        "send_count": row["send_count"], "delivery_status": row["delivery_status"],
         "accepted_at": row["accepted_at"],
     }
 
@@ -59,24 +51,6 @@ def _public(row):
 def list_invitations():
     rows = get_db().execute("SELECT * FROM admin_invitations ORDER BY id DESC LIMIT 200").fetchall()
     return [_public(r) for r in rows]
-
-
-def _deliver(row, token, inviter_name):
-    """E-mail the link. Returns (delivery_status, link_for_manual_sharing_or_None). The link is returned to the
-    (authenticated, primary) caller only when e-mail could not be delivered, so the invite is never stranded."""
-    link = invite_link(token)
-    hours = get_settings().invite_ttl_hours
-    status = mail_service.send(
-        row["email"], "You are invited to administer Campus Connect",
-        f"{inviter_name} invited you to be an administrator of Campus Connect.\n\n"
-        f"Open this link to choose your password (valid for {hours} hours, single use):\n{link}\n\n"
-        "If you did not expect this invitation, ignore this e-mail.")
-    db = get_db()
-    db.execute(
-        "UPDATE admin_invitations SET delivery_status = ?, last_sent_at = datetime('now'), send_count = send_count + 1 "
-        "WHERE id = ?", (status, row["id"]))
-    db.commit()
-    return status, (link if status != mail_service.SENT else None)
 
 
 def create_invitation(actor, email, full_name=None):
@@ -106,7 +80,7 @@ def create_invitation(actor, email, full_name=None):
     audit_service.record(actor, "admin_invite.create", email)
     # Demo flow: nothing is e-mailed. The primary admin tells the person their e-mail + the admin ID; the account
     # is created on that person's first sign-in (auth_service.authenticate_admin).
-    return _public(row), "NONE", None
+    return _public(row)
 
 
 def resend_invitation(actor, invitation_id):
@@ -123,7 +97,7 @@ def resend_invitation(actor, invitation_id):
     db.commit()
     audit_service.record(actor, "admin_invite.resend", row["email"])
     row = db.execute("SELECT * FROM admin_invitations WHERE id = ?", (invitation_id,)).fetchone()
-    return _public(row), "NONE", None
+    return _public(row)
 
 
 def revoke_invitation(actor, invitation_id):
@@ -136,59 +110,3 @@ def revoke_invitation(actor, invitation_id):
     db.execute("UPDATE admin_invitations SET status = 'REVOKED' WHERE id = ? AND status = 'PENDING'", (invitation_id,))
     db.commit()
     audit_service.record(actor, "admin_invite.revoke", row["email"])
-
-
-_THROTTLE_KEY = "\x01admin-invite"
-
-
-def _find_valid(token, ip):
-    cfg = get_settings()
-    if ip and sq.count_recent_failures_for_identifier(_THROTTLE_KEY + ip, cfg.login_window_minutes) >= 20:
-        raise auth_service.LockoutError(auth_service.LOCKOUT_MESSAGE)
-    row = None
-    if isinstance(token, str) and 20 <= len(token) <= 200:
-        row = get_db().execute(
-            "SELECT * FROM admin_invitations WHERE token_hash = ? AND status = 'PENDING' AND expires_at > ?",
-            (_hash(token), sq.fmt(sq.utcnow()))).fetchone()
-    if row is None:
-        sq.record_login_attempt(_THROTTLE_KEY + (ip or ""), None, False)  # not in the login IP counter
-        raise InvitationError(INVALID_LINK)
-    return row
-
-
-def inspect_invitation(token, ip=None):
-    """Public: who the link is for (no secrets), so the page can greet them."""
-    row = _find_valid(token, ip)
-    return {"email": row["email"], "full_name": row["full_name"], "expires_at": row["expires_at"]}
-
-
-def accept_invitation(token, full_name, password, confirm_password, ip=None):
-    """Create the ADMIN account and consume the invitation atomically. Returns the new user id."""
-    row = _find_valid(token, ip)
-    if password != confirm_password:
-        raise ValidationError("Passwords do not match.", "confirm_password")
-    full_name = auth_service.validate_required(full_name or row["full_name"], "Full name", "full_name")
-    password_hash = hash_password(password, disallow=(row["email"],))  # validates strength before consuming
-    db = get_db()
-    claimed = db.execute(
-        "UPDATE admin_invitations SET status = 'ACCEPTED', accepted_at = datetime('now') "
-        "WHERE id = ? AND status = 'PENDING' AND token_hash = ?", (row["id"], _hash(token))).rowcount
-    if claimed != 1:  # someone else consumed it first
-        db.rollback()
-        raise InvitationError(INVALID_LINK)
-    if queries.get_user_by_email(row["email"]):
-        db.rollback()
-        raise InvitationError(INVALID_LINK)
-    try:
-        cur = db.execute(
-            "INSERT INTO users (role, email, password_hash, full_name) VALUES ('ADMIN', ?, ?, ?)",
-            (row["email"], password_hash, full_name))
-    except Exception as exc:  # noqa: BLE001
-        db.rollback()
-        if exc.__class__.__name__ == "UniqueViolation":
-            raise InvitationError(INVALID_LINK) from exc
-        raise
-    db.execute("UPDATE admin_invitations SET accepted_user_id = ? WHERE id = ?", (cur.lastrowid, row["id"]))
-    db.commit()
-    audit_service.record(None, "admin_invite.accept", row["email"], ip=ip)
-    return cur.lastrowid

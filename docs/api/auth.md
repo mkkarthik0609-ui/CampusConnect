@@ -42,24 +42,11 @@ password reset or deactivation increments it, so every other session of that use
 anonymous) from then on. There is no passkey / WebAuthn sign-in.
 
 ## `POST /api/auth/admin-login`
-Public. Body `{"identifier": "<email>", "password": "..."}`; same response, throttling and errors as
-`/api/auth/login` but only an **active admin** account can sign in here (the password is always verified; failures
-are `401 invalid_credentials`).
-
-## `POST /api/auth/admin-invite/inspect`
-Public. Body `{"token": "<token from the invitation link>"}` (a POST, so the token never appears in a URL).
-200 `{"email": "second@college.edu", "full_name": "Second Admin" | null, "expires_at": "..."}`, `Cache-Control: no-store`.
-An unknown, expired, revoked or already used token answers 400 with
-`"This invitation link is invalid or has expired. Ask the primary administrator to send a new one."`; repeated bad
-tokens from one IP are throttled (429 `rate_limited`).
-
-## `POST /api/auth/admin-invite/accept`  (201)
-Public. Body `{"token": "...", "full_name": "...", "password": "...", "confirm_password": "..."}` (`full_name` may be
-omitted when the inviter supplied one). Atomically consumes the single-use invitation and creates an **active ADMIN**
-account in one transaction. The user is *not* signed in: 201 `{"ok": true, "message": "Your administrator account is
-ready. Please sign in."}`; then use `/api/auth/admin-login`. Errors: 400 `validation_error` (`fields.password`,
-`fields.confirm_password`, `fields.full_name`), 400 for an invalid/used/expired token, 429 when throttled.
-Invitations are created by the primary admin, see [admin.md](admin.md).
+Public. Body `{"identifier": "<email>", "admin_id": "<shared admin ID>"}` (no password). The ID is `ADMIN_ACCESS_ID`
+(default `campus-connect-123`; demo-grade, not a secret by design). Same response, throttling and errors as
+`/api/auth/login`. The e-mail must be the primary admin (`PRIMARY_ADMIN_EMAIL`, created on first sign-in if missing)
+or an e-mail the primary admin added (account created on that person's first sign-in). Every failure is the one
+generic `401 invalid_credentials`.
 
 ## `POST /api/auth/logout`
 Public (idempotent). No body. 200 `{"ok": true, "message": "You have been signed out.", "csrf_token": "new-token"}`.

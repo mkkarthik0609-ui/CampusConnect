@@ -97,36 +97,11 @@ Case-insensitive status; unknown -> `400 validation_error` (`fields.status`). Ne
                "profile_picture_url": null } }
 ```
 
-## Chats (read-only)
+## Chats
 
-### `GET /api/admin/chats`
-`{"items": [...], "total": n}`, most recently updated first:
-```json
-{ "id": 1,
-  "student": { "id": 1, "user_id": 4, "full_name": "Asha Kumar", "usn": "1AB21CS001",
-               "profile_picture_url": null, "class": { "...class object or null..." } },
-  "faculty": { "id": 1, "user_id": 2, "faculty_code": "FAC001", "full_name": "Dr Rao", "department": "AIML",
-               "profile_picture_url": null },
-  "message_count": 1, "last_message": "hello sir", "last_message_at": "...", "created_at": "...",
-  "updated_at": "..." }
-```
-
-### `GET /api/admin/chats/{chat_id}?after_id=&updated_since=`
-```json
-{ "chat": { "id": 1, "student": {...}, "faculty": {...}, "message_count": 1, "created_at": "...", "updated_at": "..." },
-  "messages": [ { "id": 1, "sender_user_id": 4, "sender_role": "STUDENT", "sender_name": "Asha Kumar",
-                  "message_text": "hello sir", "attachment_url": null, "attachment_type": null,
-                  "attachment_name": null, "status": "seen", "is_seen": true, "seen_at": "...", "delivered_at": "...",
-                  "is_edited": false, "is_unsent": false, "unsent_at": null, "reply_to": null,
-                  "created_at": "...", "updated_at": "..." } ],
-  "last_id": 1, "server_time": "..." }
-```
-Oldest first. `attachment_url` (e.g. `/uploads/chat/<file>`) is readable by the admin through the uploads route.
-**Unsent messages are tombstones** (`is_unsent: true`; text, attachment and quote are null) - the old content is gone from the database,
-and the list's `last_message` reads `<Name> unsent a message`. "Delete for me" is ignored here (the admin sees everything else).
-`reply_to` is `{ id, sender_user_id, sender_name, text_preview, attachment_kind, attachment_name, unsent }`.
-Polling works like the participants' thread (`after_id` + `updated_since` from the previous `last_id` / `server_time`).
-Reading does **not** mark anything as seen. Errors: `404 not_found`, `400 validation_error` (non-integer id, bad `updated_since`).
+Admins have **no access** to student <-> faculty conversations: there is no `/api/admin/chats*` route (404) and the
+`/api/chat/*` routes answer `403` to an admin. Admins talk to faculty only through Admin Connect (`/api/admin-messages`,
+see [chat.md](chat.md)).
 
 ## Permission (profile change) requests
 
@@ -160,47 +135,35 @@ Errors: `404 not_found`, `409 conflict` (`"This request has already been reviewe
 { "id": 1, "full_name": "Admin One", "email": "admin@college.edu", "profile_picture_url": null,
   "is_active": true, "is_you": true, "is_primary": true, "created_at": "...", "last_login_at": "..." }
 ```
-Every admin may read this list. **Only the primary admin** (`PRIMARY_ADMIN_EMAIL`) may invite admins, manage
-invitations or deactivate/reactivate admins; any other admin gets 403 `forbidden`. The primary admin is itself
+Every admin may read this list. **Only the primary admin** (`PRIMARY_ADMIN_EMAIL`) may add admins, manage
+registrations or deactivate/reactivate admins; any other admin gets 403 `forbidden`. The primary admin is itself
 protected: it cannot be deactivated or deleted (400 `validation_error`), and public signup cannot claim its e-mail
-or any e-mail with a pending invitation. There are **no temporary passwords** and no admin password reset
-endpoint; admins are created only through invitations (below).
+or any e-mail with a pending registration. Admins have **no password**: they sign in with their e-mail and the shared
+admin ID (see [auth.md](auth.md)); the account is created on first sign-in.
 
-### Admin invitations (primary admin only)
+### Admin registrations (primary admin only; path `admin-invitations`)
 
 | Endpoint | Effect |
 |---|---|
 | `GET /api/admin/admin-invitations` | `{items, total}`, newest first, at most 200 |
-| `POST /api/admin/admin-invitations` (201) | create an invitation |
-| `POST /api/admin/admin-invitations/{id}/resend` | rotate the token (the previously e-mailed link stops working), extend expiry, send again. 60 s cooldown after the last send |
-| `DELETE /api/admin/admin-invitations/{id}` | revoke a pending invitation |
+| `POST /api/admin/admin-invitations` (201) | register an admin e-mail (nothing is e-mailed) |
+| `POST /api/admin/admin-invitations/{id}/resend` | renew the registration window (`INVITE_TTL_HOURS`, default 30 days). 60 s cooldown |
+| `DELETE /api/admin/admin-invitations/{id}` | revoke a pending registration |
 
 `POST` body (unknown keys rejected): `{ "email": "second@college.edu", "full_name": "Second Admin" }`
 (`email` required, `full_name` optional, max 120). Errors: 400 `validation_error` (`fields.email`),
 `409 conflict` (`fields.email`) when an account with that e-mail exists or a non-expired invitation for it is pending.
 
-Invitation item:
+Registration item:
 ```json
 { "id": 3, "email": "second@college.edu", "full_name": "Second Admin", "status": "PENDING",
-  "created_at": "...", "expires_at": "...", "last_sent_at": "...", "send_count": 1,
-  "delivery_status": "SENT", "accepted_at": null }
+  "created_at": "...", "expires_at": "...", "last_sent_at": "...", "accepted_at": null }
 ```
-`status` is `PENDING`, `ACCEPTED`, `REVOKED` or `EXPIRED` (a `PENDING` row past `expires_at`).
-`delivery_status` is `NOT_SENT`, `SENT`, `FAILED` or `NOT_CONFIGURED`.
+`status` is `PENDING`, `ACCEPTED` (the person has signed in once), `REVOKED` or `EXPIRED` (a `PENDING` row past `expires_at`).
 
-`POST` (create) and `POST .../resend` answer `{"ok": true, "message": "...", "invitation": {...},
-"email_delivery": "SENT" | "FAILED" | "NOT_CONFIGURED", "invite_link": <string | null>}`.
-**`invite_link` is only present when the e-mail was not delivered** (`FAILED` / `NOT_CONFIGURED`), so the primary
-admin can pass it on by hand; it is shown once and never stored or logged. Delivery is never claimed when it did
-not happen: without `RESEND_API_KEY` / `MAIL_FROM` the answer is `email_delivery: "NOT_CONFIGURED"`. Resend limits:
-100 mails/day on the free tier; the sender must be on a verified domain (except the account owner's own address).
-
-Token: 256-bit random, only its SHA-256 is stored, valid `INVITE_TTL_HOURS` (default 72), single use (atomic
-`UPDATE ... WHERE status='PENDING'`). The link is `PUBLIC_APP_URL/admin-invite#t=<token>`: the token sits in the URL
-fragment, so it never reaches server logs. The invitee opens it and uses the public endpoints
-`POST /api/auth/admin-invite/inspect` and `POST /api/auth/admin-invite/accept` (see [auth.md](auth.md)).
-Resend/revoke of a non-pending invitation, or an unknown id, answers 400 `validation_error`; the resend cooldown
-answers 400 as well.
+`POST` (create) and `POST .../resend` answer `{"ok": true, "message": "...", "invitation": {...}}`. Nothing is e-mailed:
+the primary admin tells the person to sign in at Admin Login with their e-mail and the admin ID. Resend/revoke of a
+non-pending row, or an unknown id, answers 400 `validation_error`; the resend cooldown answers 400 as well.
 
 ### Managing admins
 | Endpoint | Effect |

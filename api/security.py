@@ -18,7 +18,6 @@ import anyio
 import hmac
 import json
 import logging
-from typing import Optional
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.responses import JSONResponse

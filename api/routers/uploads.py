@@ -1,7 +1,7 @@
 """GET /uploads/{path} - authorised file serving.
 
 * ``profile/students|faculty/<file>``: any signed-in user (pictures show up in search / chat lists).
-* ``chat/<file>``: only the two chat participants (subject to the normal chat access rules) or an ADMIN.
+* ``chat/<file>``: only the two chat participants (subject to the normal chat access rules). Admins get 403.
 * anything else: 404. Always ``nosniff``; non-images are sent as attachments.
 """
 import os
@@ -38,8 +38,6 @@ def _authorise_chat_attachment(rel_path, user):
     if info is None:
         raise ApiError(404, "not_found", "File not found.")
     role = user["role"]
-    if role == "ADMIN":
-        return info["original_name"]
     if role not in ("STUDENT", "FACULTY") or user["id"] not in (
         info["student_user_id"], info["faculty_user_id"]
     ):

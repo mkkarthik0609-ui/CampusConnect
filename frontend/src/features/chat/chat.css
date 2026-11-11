@@ -183,7 +183,6 @@
   clip-path: polygon(100% 0, 100% 100%, 0 0);
 }
 .wa-bubble[data-tail="true"][data-mine="true"]::before { left: auto; right: -8px; clip-path: polygon(0 0, 100% 0, 0 100%); }
-.wa-sender { display: block; margin-bottom: 1px; font-family: var(--font-display); font-size: 0.8125rem; font-weight: 500; color: var(--wa-quote-name); }
 .wa-text { margin: 0; white-space: pre-wrap; }
 .wa-tombstone { display: inline-flex; align-items: center; gap: 0.35rem; margin: 0; color: var(--wa-text-2); font-style: italic; }
 .wa-tombstone svg { width: 1rem; height: 1rem; flex: none; }
@@ -262,7 +261,6 @@
 .wa-send svg { width: 1.3rem; height: 1.3rem; }
 .wa-hint { margin: 0.2rem 0.5rem 0; color: var(--wa-text-2); font-size: 0.6875rem; }
 @media (max-width: 47.99rem) { .wa-hint { display: none; } }
-.wa-readonly { padding: 0.7rem 1rem; background: var(--wa-header); color: var(--wa-text-2); font-size: 0.8125rem; text-align: center; }
 
 .wa-emoji { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; max-height: 13rem; overflow-y: auto; }
 .wa-emoji button { height: 2.1rem; border: 0; border-radius: 6px; background: transparent; font-size: 1.3rem; line-height: 1; cursor: pointer; }

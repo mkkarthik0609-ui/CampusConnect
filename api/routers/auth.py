@@ -10,7 +10,7 @@ from api.errors import ApiError
 from api.schemas import user_payload
 from models import academic_queries as aq
 from models import queries
-from services import auth_service, captcha_service, invitation_service, notification_service as notif, session_service
+from services import auth_service, captcha_service, notification_service as notif, session_service
 from services.auth_service import ValidationError
 
 router = APIRouter(prefix="/api/auth")
@@ -31,16 +31,6 @@ class LoginIn(CaptchaIn):
 class AdminLoginIn(ApiModel):
     identifier: Stripped = Field(min_length=1, max_length=254)
     admin_id: str = Field(min_length=1, max_length=200)
-
-
-class InviteTokenIn(ApiModel):
-    token: str = Field(min_length=1, max_length=256)
-
-
-class InviteAcceptIn(InviteTokenIn):
-    full_name: Stripped = Field(default="", max_length=120)
-    password: str = Field(min_length=1, max_length=1024)
-    confirm_password: str = Field(max_length=1024)
 
 
 class StudentSignupIn(CaptchaIn):
@@ -142,23 +132,6 @@ def admin_login(body: AdminLoginIn, request: Request):
             raise ApiError(401, "invalid_credentials", str(exc)) from exc
     token = session_service.start_session(request.session, row)
     return ok("Welcome back!", user=user_payload(row), csrf_token=token)
-
-
-@router.post("/admin-invite/inspect")
-def admin_invite_inspect(body: InviteTokenIn, request: Request):
-    """Who an invitation link is for. POST (token in the body, never in a URL) and always no-store."""
-    with service_errors():
-        info = invitation_service.inspect_invitation(body.token, ip=client_ip(request))
-    return JSONResponse(info, headers={"Cache-Control": "no-store"})
-
-
-@router.post("/admin-invite/accept", status_code=201)
-def admin_invite_accept(body: InviteAcceptIn, request: Request):
-    """Choose a password and activate the invited administrator account. Signing in is a separate step."""
-    with service_errors():
-        invitation_service.accept_invitation(
-            body.token, body.full_name, body.password, body.confirm_password, ip=client_ip(request))
-    return ok("Your administrator account is ready. Please sign in.")
 
 
 @router.post("/logout")

@@ -85,48 +85,6 @@ def list_meetings(status=None):
     return get_db().execute(sql + " ORDER BY mr.requested_at DESC, mr.id DESC", params).fetchall()
 
 
-_CHAT_SELECT = """
-    SELECT c.id, c.created_at, c.updated_at, c.student_id, c.faculty_id,
-           st.usn, st.section_id AS student_section_id, st.user_id AS student_user_id,
-           su.full_name AS student_name, su.profile_picture_path AS student_picture,
-           f.faculty_code, f.department AS faculty_department, f.user_id AS faculty_user_id,
-           fu.full_name AS faculty_name, fu.profile_picture_path AS faculty_picture,
-           (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id) AS message_count,
-           (SELECT m.message_text FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC
-              LIMIT 1) AS last_message,
-           (SELECT m.is_unsent FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC
-              LIMIT 1) AS last_is_unsent,
-           (SELECT m.sender_user_id FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC
-              LIMIT 1) AS last_sender_user_id,
-           (SELECT m.created_at FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC
-              LIMIT 1) AS last_message_at
-    FROM chats c
-    JOIN students st ON st.id = c.student_id JOIN users su ON su.id = st.user_id
-    JOIN faculty f ON f.id = c.faculty_id JOIN users fu ON fu.id = f.user_id
-"""
-
-
-def list_chats():
-    return get_db().execute(_CHAT_SELECT + " ORDER BY c.updated_at DESC, c.id DESC").fetchall()
-
-
-def get_chat(chat_id):
-    return get_db().execute(_CHAT_SELECT + " WHERE c.id = ?", (chat_id,)).fetchone()
-
-
-def count_messages(chat_id):
-    return get_db().execute("SELECT COUNT(*) AS n FROM messages WHERE chat_id = ?", (chat_id,)).fetchone()["n"]
-
-
-def list_messages(chat_id, after_id=0, since=None):
-    """Every message of the chat (the admin viewer ignores 'delete for me'); with ``after_id`` / ``since`` only
-    the new and the changed ones."""
-    return get_db().execute(
-        "SELECT * FROM messages WHERE chat_id = ? AND (id > ? OR updated_at >= ?) ORDER BY created_at ASC, id ASC",
-        (chat_id, after_id or 0, since),
-    ).fetchall()
-
-
 def list_permission_requests():
     return get_db().execute(
         """SELECT pr.*, ru.full_name AS requester_name, ru.role AS requester_role,

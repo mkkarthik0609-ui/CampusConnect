@@ -51,7 +51,7 @@ const facultyRoutes = [
   { path: "meetings", element: page(() => import("@/pages/faculty/Meetings")) },
   { path: "find-students", element: page(() => import("@/pages/faculty/FindStudents")) },
   { path: "approvals", element: page(() => import("@/pages/faculty/Approvals")) },
-  { path: "admin-messages", element: page(() => import("@/pages/shared/AdminMessages")) },
+  { path: "admin-connect", element: page(() => import("@/pages/shared/AdminMessages")) },
 ];
 
 // ---- admin: /admin/... -------------------------------------------------------------------
@@ -65,11 +65,9 @@ const adminRoutes = [
   { path: "students", element: page(() => import("@/pages/admin/Students")) },
   { path: "faculty", element: page(() => import("@/pages/admin/Faculty")) },
   { path: "meetings", element: page(() => import("@/pages/admin/Meetings")) },
-  { path: "chats", element: page(() => import("@/pages/admin/Chats")) },
-  { path: "chats/:id", element: page(() => import("@/pages/admin/ChatThread")) },
   { path: "approvals", element: page(() => import("@/pages/admin/Approvals")) },
   { path: "admins", element: page(() => import("@/pages/admin/Admins")) },
-  { path: "faculty-messages", element: page(() => import("@/pages/shared/AdminMessages")) },
+  { path: "admin-connect", element: page(() => import("@/pages/shared/AdminMessages")) },
 ];
 
 // ---- any signed-in user ------------------------------------------------------------------
@@ -104,12 +102,6 @@ export const routes = [
     children: [
       // public landing (also reachable when signed in; its header then offers "Open dashboard")
       { path: "/", element: page(() => import("@/pages/site/Landing")) },
-
-      // public invitation page (token in the URL fragment): reachable signed in or out
-      {
-        element: <AuthLayout />,
-        children: [{ path: "/admin-invite", element: page(() => import("@/pages/site/AdminInvite")) }],
-      },
 
       // guest-only: signed-in users are bounced to their home (or ?next=)
       {

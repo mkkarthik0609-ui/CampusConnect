@@ -1,4 +1,4 @@
-"""/api/admin/* - the admin console: dashboard, people, meetings, chats, approvals, admin accounts.
+"""/api/admin/* - the admin console: dashboard, people, meetings, approvals, admin accounts.
 
 Every route here is ADMIN-only: the dependency is attached to the router itself, so a route added
 later cannot forget it. Academic structure, assignments, requests and the class directory live in
@@ -10,16 +10,14 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import Field
 
-from api.deps import ApiModel, CurrentUser, Stripped, client_ip, items, ok, require_role, service_errors
+from api.deps import ApiModel, CurrentUser, Stripped, items, ok, require_role, service_errors
 from api.errors import ApiError
 from api.settings import get_settings
 from api.schemas import class_object, profile_picture_url
-from api.routers._messages import now_str, parse_since, reply_embed, status_of
 from models import academic_queries as aq
 from models import admin_queries
 from models import queries
-from models import security_queries as sq
-from services import audit_service, auth_service, file_service, invitation_service, permission_service
+from services import audit_service, auth_service, invitation_service, permission_service
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_role("ADMIN"))], tags=["admin"])
 
@@ -227,84 +225,6 @@ def list_meetings(status: Optional[str] = Query(None, max_length=20)):
     return items(out, total=len(out))
 
 
-# ---------------------------------------------------------------- chats (read-only)
-
-def _chat_parties(chat, combos):
-    return (
-        {"id": chat["student_id"], "user_id": chat["student_user_id"], "full_name": chat["student_name"],
-         "usn": _display_usn(chat["usn"]), "profile_picture_url": profile_picture_url(chat["student_picture"]),
-         "class": class_for(combos, chat["student_section_id"])},
-        {**faculty_mini(chat["faculty_id"], chat["faculty_code"], chat["faculty_name"], chat["faculty_picture"],
-                        chat["faculty_department"]), "user_id": chat["faculty_user_id"]},
-    )
-
-
-@router.get("/chats")
-def list_chats():
-    combos = combos_by_section()
-    out = []
-    for c in admin_queries.list_chats():
-        student, faculty = _chat_parties(c, combos)
-        last_message = c["last_message"]
-        if c["last_is_unsent"]:  # a tombstone never shows the old content
-            who = student if c["last_sender_user_id"] == c["student_user_id"] else faculty
-            last_message = f"{who['full_name']} unsent a message"
-        out.append({
-            "id": c["id"], "student": student, "faculty": faculty, "message_count": c["message_count"],
-            "last_message": last_message, "last_message_at": c["last_message_at"],
-            "created_at": c["created_at"], "updated_at": c["updated_at"],
-        })
-    return items(out, total=len(out))
-
-
-@router.get("/chats/{chat_id}")
-def chat_detail(chat_id: int, after_id: int = Query(0, ge=0),
-                updated_since: Optional[str] = Query(None, description="also messages changed at/after this ISO time")):
-    """Read-only view of a conversation (opening it marks nothing as seen). Unsent messages are tombstones.
-    Poll with ``after_id=last_id`` + ``updated_since=server_time`` like the participants do."""
-    since = parse_since(updated_since)
-    chat = admin_queries.get_chat(chat_id)
-    if chat is None:
-        raise ApiError(404, "not_found", "Conversation not found.")
-    server_time = now_str()
-    student, faculty = _chat_parties(chat, combos_by_section())
-    rows = admin_queries.list_messages(chat_id, after_id, since)
-    names = {chat["student_user_id"]: student["full_name"], chat["faculty_user_id"]: faculty["full_name"]}
-    replies = queries.get_messages_by_ids("messages", [r["reply_to_id"] for r in rows if r["reply_to_id"]])
-    messages = []
-    for m in rows:
-        from_student = m["sender_user_id"] == chat["student_user_id"]
-        unsent = bool(m["is_unsent"])
-        messages.append({
-            "id": m["id"],
-            "sender_user_id": m["sender_user_id"],
-            "sender_role": "STUDENT" if from_student else "FACULTY",
-            "sender_name": student["full_name"] if from_student else faculty["full_name"],
-            "message_text": None if unsent else m["message_text"],
-            "attachment_url": None if unsent else file_service.upload_url(m["attachment_path"]),
-            "attachment_type": None if unsent else m["attachment_type"],
-            "attachment_name": None if unsent else m["attachment_original_name"],
-            "status": status_of(m["is_seen"], m["delivered_at"]),
-            "is_seen": bool(m["is_seen"]),
-            "seen_at": m["seen_at"],
-            "delivered_at": m["delivered_at"],
-            "is_edited": bool(m["is_edited"]) and not unsent,
-            "is_unsent": unsent,
-            "unsent_at": m["unsent_at"],
-            "reply_to": None if unsent else reply_embed(replies.get(m["reply_to_id"]), None, names),
-            "created_at": m["created_at"],
-            "updated_at": m["updated_at"],
-        })
-    return {
-        "chat": {"id": chat["id"], "student": student, "faculty": faculty,
-                 "message_count": admin_queries.count_messages(chat_id),
-                 "created_at": chat["created_at"], "updated_at": chat["updated_at"]},
-        "messages": messages,
-        "last_id": max([after_id, *(m["id"] for m in messages)]),
-        "server_time": server_time,
-    }
-
-
 # ---------------------------------------------------------------- permission (profile change) requests
 
 def _changes(raw):
@@ -377,19 +297,9 @@ def list_admins(user: CurrentUser = Depends(require_role("ADMIN"))):
     return items(out, total=len(out))
 
 
-def _invite_response(message, invitation, delivery, link):
-    """`delivery` is SENT / FAILED / NOT_CONFIGURED. The link is only present when the e-mail was NOT sent, so
-    the primary admin can pass it on by hand; it is shown once and never stored or logged."""
-    if delivery == "NONE":
-        detail = "Tell them to sign in at Admin Login with this e-mail and the admin ID."
-    elif delivery == "SENT":
-        detail = "Invitation e-mailed."
-    elif delivery == "NOT_CONFIGURED":
-        detail = ("E-mail delivery is not configured on the server (RESEND_API_KEY / MAIL_FROM), so nothing was "
-                  "sent. Share the one-time link below yourself.")
-    else:
-        detail = "The e-mail could not be delivered. Share the one-time link below yourself, or resend."
-    return ok(f"{message} {detail}", invitation=invitation, email_delivery=delivery, invite_link=link)
+def _invite_response(message, invitation):
+    """Nothing is e-mailed: the primary admin tells the person to sign in at Admin Login with their e-mail + the admin ID."""
+    return ok(f"{message} Tell them to sign in at Admin Login with this e-mail and the admin ID.", invitation=invitation)
 
 
 @router.get("/admin-invitations")
@@ -400,17 +310,17 @@ def list_admin_invitations(user: CurrentUser = Depends(primary_admin)):
 
 @router.post("/admin-invitations", status_code=201)
 def invite_admin(body: AdminInviteIn, request: Request, user: CurrentUser = Depends(primary_admin)):
-    """Primary admin only: invite a future administrator by e-mail address."""
+    """Primary admin only: register a future administrator by e-mail address."""
     with service_errors():
-        invitation, delivery, link = invitation_service.create_invitation(user, body.email, body.full_name)
-    return _invite_response("Invitation created.", invitation, delivery, link)
+        invitation = invitation_service.create_invitation(user, body.email, body.full_name)
+    return _invite_response("Admin added.", invitation)
 
 
 @router.post("/admin-invitations/{invitation_id}/resend")
 def resend_admin_invitation(invitation_id: int, user: CurrentUser = Depends(primary_admin)):
     with service_errors():
-        invitation, delivery, link = invitation_service.resend_invitation(user, invitation_id)
-    return _invite_response("Invitation renewed.", invitation, delivery, link)
+        invitation = invitation_service.resend_invitation(user, invitation_id)
+    return _invite_response("Registration renewed.", invitation)
 
 
 @router.delete("/admin-invitations/{invitation_id}")

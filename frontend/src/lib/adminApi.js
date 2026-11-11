@@ -18,8 +18,6 @@ export const adminKeys = {
   students: ["admin", "students"],
   faculty: ["admin", "faculty"],
   meetings: (status) => ["admin", "meetings", status || "ALL"],
-  chats: ["admin", "chats"],
-  chat: (id) => ["admin", "chats", String(id)],
   permissions: ["admin", "permission-requests"],
   admins: ["admin", "admins"],
   adminInvitations: ["admin", "admin-invitations"],
@@ -59,15 +57,13 @@ export const adminApi = {
 
   // ---- admin invitations (primary admin only) ----
   adminInvitations: () => api.get(`${A}/admin-invitations`),
-  /** { email, full_name? } -> { message, invitation, email_delivery, invite_link } (invite_link only when the e-mail was NOT sent) */
+  /** { email, full_name? } -> { message, invitation } (nothing is e-mailed) */
   inviteAdmin: (body) => api.post(`${A}/admin-invitations`, body),
   resendAdminInvitation: (id) => api.post(`${A}/admin-invitations/${id}/resend`, {}),
   revokeAdminInvitation: (id) => api.delete(`${A}/admin-invitations/${id}`),
 
   // ---- oversight ----
   meetings: (status) => api.get(`${A}/meetings`, { params: { status } }),
-  chats: () => api.get(`${A}/chats`),
-  chat: (id, { afterId = 0, since } = {}) => api.get(`${A}/chats/${id}`, { params: { after_id: afterId || undefined, updated_since: since } }),
   permissionRequests: () => api.get(`${A}/permission-requests`),
   decidePermission: (id, decision) => api.post(`${A}/permission-requests/${id}/decide`, { decision }),
 };

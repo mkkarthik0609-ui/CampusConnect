@@ -59,13 +59,5 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      # Admin invitations: links point at the SPA; e-mail goes out through Resend (free tier). Without
-      # RESEND_API_KEY + MAIL_FROM the app reports NOT_CONFIGURED and never claims a mail was sent.
-      - key: PUBLIC_APP_URL
-        value: https://campus-connect-network.vercel.app
-      - key: RESEND_API_KEY
-        sync: false
-      - key: MAIL_FROM
-        sync: false
       - key: REMINDER_INTERVAL_MINUTES
         value: "60"

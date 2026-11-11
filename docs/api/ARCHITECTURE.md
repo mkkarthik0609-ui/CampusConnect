@@ -52,9 +52,9 @@ an explicit `Settings(...)`.
 | `SESSION_IDLE_TIMEOUT_MINUTES` | `session_idle_timeout_minutes` | 60 (absolute lifetime 12 h = `session_lifetime_seconds`) |
 | `ENABLE_SCHEDULER` | `enable_scheduler` | `1`; reminder job interval `REMINDER_INTERVAL_MINUTES` (60) |
 | `BOOTSTRAP_ADMIN` + `ADMIN_NAME/EMAIL/PASSWORD` | `bootstrap_admin` | creates the primary admin at start only if absent; never overwrites a password; drops `ADMIN_PASSWORD` from the process environment afterwards |
-| `PRIMARY_ADMIN_EMAIL` | `primary_admin_email` | `mkkarthik0609@gmail.com`; cannot be deactivated; only it invites admins |
-| `PUBLIC_APP_URL`, `INVITE_TTL_HOURS` | `public_app_url`, `invite_ttl_hours` | invitation link origin; invitation lifetime (72 h) |
-| `RESEND_API_KEY`, `MAIL_FROM` | `resend_api_key`, `mail_from` | e-mail delivery of invitations (Resend); unset => `NOT_CONFIGURED` |
+| `PRIMARY_ADMIN_EMAIL` | `primary_admin_email` | `mkkarthik0609@gmail.com`; cannot be deactivated; only it adds admins |
+| `INVITE_TTL_HOURS` | `invite_ttl_hours` | how long an added admin e-mail stays registered (720 h) |
+| `ADMIN_ACCESS_ID` | `admin_access_id` | shared admin ID for Admin Login (default `campus-connect-123`, demo-grade) |
 | `SEED_EXTRA_BRANCHES` | `seed_extra_branches` | `1`; seeds ECE, ISE, ... besides CSE |
 | - | `csrf_enabled` | `True`; only tests set `False` |
 | - | `testing` | `True` in tests: no scheduler, no admin bootstrap, random secret if none |

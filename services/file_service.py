@@ -4,7 +4,6 @@ The ``upload`` arguments are Starlette/FastAPI ``UploadFile`` objects (anything 
 and a file-like ``.file`` - or ``.stream`` - works). Files are validated by extension, size and magic
 bytes and stored under a random uuid name; the original name is kept only as sanitised metadata."""
 import io
-import os
 import uuid
 import zipfile
 
